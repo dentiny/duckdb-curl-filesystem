@@ -14,20 +14,20 @@ set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
 
 project(${TARGET_NAME})
 include_directories(src/include)
-include_directories(duckdb-httpfs/extension/httpfs/include)
 include_directories(duckdb/third_party/httplib)
 
-set(EXTENSION_SOURCES src/quack_extension.cpp
-    duckdb-httpfs/extension/httpfs/create_secret_functions.cpp
-    duckdb-httpfs/extension/httpfs/crypto.cpp
-    duckdb-httpfs/extension/httpfs/hash_functions.cpp
-    duckdb-httpfs/extension/httpfs/hffs.cpp
-    duckdb-httpfs/extension/httpfs/http_state.cpp
-    duckdb-httpfs/extension/httpfs/httpfs.cpp
-    duckdb-httpfs/extension/httpfs/httpfs_curl_client.cpp
-    duckdb-httpfs/extension/httpfs/httpfs_extension.cpp
-    duckdb-httpfs/extension/httpfs/httpfs_httplib_client.cpp
-    duckdb-httpfs/extension/httpfs/s3fs.cpp)
+set(EXTENSION_SOURCES 
+    src/create_secret_functions.cpp
+    src/crypto.cpp
+    src/hash_functions.cpp
+    src/hffs.cpp
+    src/http_state.cpp
+    src/httpfs.cpp
+    src/httpfs_curl_client.cpp
+    src/httpfs_extension.cpp
+    src/httpfs_httplib_client.cpp
+    src/quack_extension.cpp
+    src/s3fs.cpp)
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
