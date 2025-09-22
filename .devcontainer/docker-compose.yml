@@ -26,15 +26,15 @@ services:
         aliases:
           - s3.local
     ports:
-      - "19000:9000"  # S3 API
-      - "19001:9001"  # Web UI
+      - "39000:9000"  # S3 API
+      - "39001:9001"  # Web UI
 
   fake-gcs:
     image: fsouza/fake-gcs-server:latest
     hostname: gcs
     command: ["-scheme", "http", "-port", "4443"]
     ports:
-      - "14443:4443"
+      - "34443:4443"
     networks:
       shared_network:
         aliases:
