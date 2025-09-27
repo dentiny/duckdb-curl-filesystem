@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5)
 
 # Set extension name here
-set(TARGET_NAME quack)
+set(TARGET_NAME curl_httpfs)
 
 # DuckDB's extension distribution supports vcpkg. As such, dependencies can be added in ./vcpkg.json and then
 # used in cmake with find_package. Feel free to remove or replace with other dependencies.
@@ -19,14 +19,15 @@ include_directories(duckdb/third_party/httplib)
 set(EXTENSION_SOURCES 
     src/create_secret_functions.cpp
     src/crypto.cpp
+    src/curl_httpfs_extension.cpp
     src/hash_functions.cpp
     src/hffs.cpp
     src/http_state.cpp
     src/httpfs.cpp
     src/httpfs_curl_client.cpp
-    src/httpfs_extension.cpp
     src/httpfs_httplib_client.cpp
-    src/quack_extension.cpp
+    src/httpfs_multi_curl_client.cpp
+    src/multicurl_engine.cpp
     src/s3fs.cpp)
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})

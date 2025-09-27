@@ -7,23 +7,24 @@
 #include <sys/stat.h>
 #include "duckdb/common/exception/http_exception.hpp"
 
+#define CHECK_CURL_OK(expr) D_ASSERT((expr) == CURLE_OK)
+
 namespace duckdb {
 
 // we statically compile in libcurl, which means the cert file location of the build machine is the
 // place curl will look. But not every distro has this file in the same location, so we search a
 // number of common locations and use the first one we find.
 static std::string certFileLocations[] = {
-	// Arch, Debian-based, Gentoo
-	"/etc/ssl/certs/ca-certificates.crt",
-	// RedHat 7 based
-	"/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
-	// Redhat 6 based
-	"/etc/pki/tls/certs/ca-bundle.crt",
-	// OpenSUSE
-	"/etc/ssl/ca-bundle.pem",
-	// Alpine
-	"/etc/ssl/cert.pem"};
-
+    // Arch, Debian-based, Gentoo
+    "/etc/ssl/certs/ca-certificates.crt",
+    // RedHat 7 based
+    "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+    // Redhat 6 based
+    "/etc/pki/tls/certs/ca-bundle.crt",
+    // OpenSUSE
+    "/etc/ssl/ca-bundle.pem",
+    // Alpine
+    "/etc/ssl/cert.pem"};
 
 //! Grab the first path that exists, from a list of well-known locations
 static std::string SelectCURLCertPath() {
@@ -40,15 +41,15 @@ static std::string cert_path = SelectCURLCertPath();
 
 static size_t RequestWriteCallback(void *contents, size_t size, size_t nmemb, void *userp) {
 	size_t totalSize = size * nmemb;
-	std::string* str = static_cast<std::string*>(userp);
-	str->append(static_cast<char*>(contents), totalSize);
+	std::string *str = static_cast<std::string *>(userp);
+	str->append(static_cast<char *>(contents), totalSize);
 	return totalSize;
 }
 
 static size_t RequestHeaderCallback(void *contents, size_t size, size_t nmemb, void *userp) {
 	size_t totalSize = size * nmemb;
-	std::string header(static_cast<char*>(contents), totalSize);
-	HeaderCollector* header_collection = static_cast<HeaderCollector*>(userp);
+	std::string header(static_cast<char *>(contents), totalSize);
+	HeaderCollector *header_collection = static_cast<HeaderCollector *>(userp);
 
 	// Trim trailing \r\n
 	if (!header.empty() && header.back() == '\n') {
@@ -82,24 +83,23 @@ static size_t RequestHeaderCallback(void *contents, size_t size, size_t nmemb, v
 	return totalSize;
 }
 
- CURLHandle::CURLHandle(const string &token, const string &cert_path) {
+CURLHandle::CURLHandle(const string &token, const string &cert_path) {
 	curl = curl_easy_init();
 	if (!curl) {
 		throw InternalException("Failed to initialize curl");
 	}
 	if (!token.empty()) {
-		curl_easy_setopt(curl, CURLOPT_XOAUTH2_BEARER, token.c_str());
-		curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_BEARER);
+		CHECK_CURL_OK(curl_easy_setopt(curl, CURLOPT_XOAUTH2_BEARER, token.c_str()));
+		CHECK_CURL_OK(curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_BEARER));
 	}
 	if (!cert_path.empty()) {
-		curl_easy_setopt(curl, CURLOPT_CAINFO, cert_path.c_str());
+		CHECK_CURL_OK(curl_easy_setopt(curl, CURLOPT_CAINFO, cert_path.c_str()));
 	}
 }
 
 CURLHandle::~CURLHandle() {
 	curl_easy_cleanup(curl);
 }
-
 
 struct RequestInfo {
 	string url = "";
@@ -108,8 +108,7 @@ struct RequestInfo {
 	std::vector<HTTPHeaders> header_collection;
 };
 
-
-static idx_t httpfs_client_count = 0;
+static std::atomic<idx_t> httpfs_client_count {0};
 
 class HTTPFSCurlClient : public HTTPClient {
 public:
@@ -128,43 +127,48 @@ public:
 
 		// set curl options
 		// follow redirects
-		curl_easy_setopt(*curl, CURLOPT_FOLLOWLOCATION, 1L);
+		CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_FOLLOWLOCATION, 1L));
 
 		// Curl re-uses connections by default
 		if (!http_params.keep_alive) {
-			curl_easy_setopt(*curl, CURLOPT_FORBID_REUSE, 1L);
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_FORBID_REUSE, 1L));
 		}
 
 		if (http_params.enable_curl_server_cert_verification) {
-			curl_easy_setopt(*curl, CURLOPT_SSL_VERIFYPEER, 1L);   // Verify the cert
-			curl_easy_setopt(*curl, CURLOPT_SSL_VERIFYHOST, 2L);   // Verify that the cert matches the hostname
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_SSL_VERIFYPEER, 1L)); // Verify the cert
+			CHECK_CURL_OK(
+			    curl_easy_setopt(*curl, CURLOPT_SSL_VERIFYHOST, 2L)); // Verify that the cert matches the hostname
 		} else {
-			curl_easy_setopt(*curl, CURLOPT_SSL_VERIFYPEER, 0L);   // Override default, don't verify the cert
-			curl_easy_setopt(*curl, CURLOPT_SSL_VERIFYHOST, 0L);   // Override default, don't verify that the cert matches the hostname
+			CHECK_CURL_OK(
+			    curl_easy_setopt(*curl, CURLOPT_SSL_VERIFYPEER, 0L)); // Override default, don't verify the cert
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_SSL_VERIFYHOST,
+			                               0L)); // Override default, don't verify that the cert matches the hostname
 		}
 
 		// set read timeout
-		curl_easy_setopt(*curl, CURLOPT_TIMEOUT, http_params.timeout);
+		CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_TIMEOUT, http_params.timeout));
 		// set connection timeout
-		curl_easy_setopt(*curl, CURLOPT_CONNECTTIMEOUT, http_params.timeout);
+		CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_CONNECTTIMEOUT, http_params.timeout));
 		// accept content as-is (i.e no decompressing)
-		curl_easy_setopt(*curl, CURLOPT_ACCEPT_ENCODING, "identity");
+		CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_ACCEPT_ENCODING, "identity"));
 		// follow redirects
-		curl_easy_setopt(*curl, CURLOPT_FOLLOWLOCATION, 1L);
+		CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_FOLLOWLOCATION, 1L));
 
 		// define the header callback
-		curl_easy_setopt(*curl, CURLOPT_HEADERFUNCTION, RequestHeaderCallback);
-		curl_easy_setopt(*curl, CURLOPT_HEADERDATA, &request_info->header_collection);
+		CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_HEADERFUNCTION, RequestHeaderCallback));
+		CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_HEADERDATA, &request_info->header_collection));
 		// define the write data callback (for get requests)
-		curl_easy_setopt(*curl, CURLOPT_WRITEFUNCTION, RequestWriteCallback);
-		curl_easy_setopt(*curl, CURLOPT_WRITEDATA, &request_info->body);
+		CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_WRITEFUNCTION, RequestWriteCallback));
+		CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_WRITEDATA, &request_info->body));
 
 		if (!http_params.http_proxy.empty()) {
-			curl_easy_setopt(*curl, CURLOPT_PROXY, StringUtil::Format("%s:%s", http_params.http_proxy, http_params.http_proxy_port).c_str());
+			CHECK_CURL_OK(curl_easy_setopt(
+			    *curl, CURLOPT_PROXY,
+			    StringUtil::Format("%s:%s", http_params.http_proxy, http_params.http_proxy_port).c_str()));
 
 			if (!http_params.http_proxy_username.empty()) {
-				curl_easy_setopt(*curl, CURLOPT_PROXYUSERNAME, http_params.http_proxy_username.c_str());
-				curl_easy_setopt(*curl, CURLOPT_PROXYPASSWORD, http_params.http_proxy_password.c_str());
+				CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_PROXYUSERNAME, http_params.http_proxy_username.c_str()));
+				CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_PROXYPASSWORD, http_params.http_proxy_password.c_str()));
 			}
 		}
 	}
@@ -188,16 +192,17 @@ public:
 		CURLcode res;
 		{
 			// If the same handle served a HEAD request, we must set NOBODY back to 0L to request content again
-			curl_easy_setopt(*curl, CURLOPT_NOBODY, 0L);
-			curl_easy_setopt(*curl, CURLOPT_URL, request_info->url.c_str());
-			curl_easy_setopt(*curl, CURLOPT_HTTPHEADER, curl_headers ? curl_headers.headers : nullptr);
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_NOBODY, 0L));
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_URL, request_info->url.c_str()));
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_HTTPHEADER, curl_headers ? curl_headers.headers : nullptr));
 			res = curl->Execute();
 		}
 
 		curl_easy_getinfo(*curl, CURLINFO_RESPONSE_CODE, &request_info->response_code);
 
 		idx_t bytes_received = 0;
-		if (!request_info->header_collection.empty() && request_info->header_collection.back().HasHeader("content-length")) {
+		if (!request_info->header_collection.empty() &&
+		    request_info->header_collection.back().HasHeader("content-length")) {
 			bytes_received = std::stoi(request_info->header_collection.back().GetHeaderValue("content-length"));
 			D_ASSERT(bytes_received == request_info->body.size());
 		} else {
@@ -207,9 +212,9 @@ public:
 			state->total_bytes_received += bytes_received;
 		}
 
-		const char* data = request_info->body.c_str();
+		const char *data = request_info->body.c_str();
 		if (info.content_handler) {
-			 info.content_handler(const_data_ptr_cast(data), bytes_received);
+			info.content_handler(const_data_ptr_cast(data), bytes_received);
 		}
 
 		return TransformResponseCurl(res);
@@ -233,15 +238,15 @@ public:
 
 		CURLcode res;
 		{
-			curl_easy_setopt(*curl, CURLOPT_URL, request_info->url.c_str());
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_URL, request_info->url.c_str()));
 			// Perform PUT
-			curl_easy_setopt(*curl, CURLOPT_CUSTOMREQUEST, "PUT");
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_CUSTOMREQUEST, "PUT"));
 			// Include PUT body
-			curl_easy_setopt(*curl, CURLOPT_POSTFIELDS, const_char_ptr_cast(info.buffer_in));
-			curl_easy_setopt(*curl, CURLOPT_POSTFIELDSIZE, info.buffer_in_len);
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_POSTFIELDS, const_char_ptr_cast(info.buffer_in)));
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_POSTFIELDSIZE, info.buffer_in_len));
 
 			// Apply headers
-			curl_easy_setopt(*curl, CURLOPT_HTTPHEADER, curl_headers ? curl_headers.headers : nullptr);
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_HTTPHEADER, curl_headers ? curl_headers.headers : nullptr));
 
 			res = curl->Execute();
 		}
@@ -267,14 +272,14 @@ public:
 		CURLcode res;
 		{
 			// Set URL
-			curl_easy_setopt(*curl, CURLOPT_URL, request_info->url.c_str());
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_URL, request_info->url.c_str()));
 
 			// Perform HEAD request instead of GET
-			curl_easy_setopt(*curl, CURLOPT_NOBODY, 1L);
-			curl_easy_setopt(*curl, CURLOPT_HTTPGET, 0L);
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_NOBODY, 1L));
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_HTTPGET, 0L));
 
 			// Add headers if any
-			curl_easy_setopt(*curl, CURLOPT_HTTPHEADER, curl_headers ? curl_headers.headers : nullptr);
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_HTTPHEADER, curl_headers ? curl_headers.headers : nullptr));
 
 			// Execute HEAD request
 			res = curl->Execute();
@@ -300,16 +305,16 @@ public:
 		CURLcode res;
 		{
 			// Set URL
-			curl_easy_setopt(*curl, CURLOPT_URL, request_info->url.c_str());
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_URL, request_info->url.c_str()));
 
 			// Set DELETE request method
-			curl_easy_setopt(*curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_CUSTOMREQUEST, "DELETE"));
 
 			// Follow redirects
-			curl_easy_setopt(*curl, CURLOPT_FOLLOWLOCATION, 1L);
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_FOLLOWLOCATION, 1L));
 
 			// Add headers if any
-			curl_easy_setopt(*curl, CURLOPT_HTTPHEADER, curl_headers ? curl_headers.headers : nullptr);
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_HTTPHEADER, curl_headers ? curl_headers.headers : nullptr));
 
 			// Execute DELETE request
 			res = curl->Execute();
@@ -317,7 +322,7 @@ public:
 
 		// Get HTTP response status code
 		curl_easy_getinfo(*curl, CURLINFO_RESPONSE_CODE, &request_info->response_code);
-		return TransformResponseCurl( res);
+		return TransformResponseCurl(res);
 	}
 
 	unique_ptr<HTTPResponse> Post(PostRequestInfo &info) override {
@@ -338,15 +343,15 @@ public:
 
 		CURLcode res;
 		{
-			curl_easy_setopt(*curl, CURLOPT_URL, request_info->url.c_str());
-			curl_easy_setopt(*curl, CURLOPT_POST, 1L);
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_URL, request_info->url.c_str()));
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_POST, 1L));
 
 			// Set POST body
-			curl_easy_setopt(*curl, CURLOPT_POSTFIELDS, const_char_ptr_cast(info.buffer_in));
-			curl_easy_setopt(*curl, CURLOPT_POSTFIELDSIZE, info.buffer_in_len);
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_POSTFIELDS, const_char_ptr_cast(info.buffer_in)));
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_POSTFIELDSIZE, info.buffer_in_len));
 
 			// Add headers if any
-			curl_easy_setopt(*curl, CURLOPT_HTTPHEADER, curl_headers ? curl_headers.headers : nullptr);
+			CHECK_CURL_OK(curl_easy_setopt(*curl, CURLOPT_HTTPHEADER, curl_headers ? curl_headers.headers : nullptr));
 
 			// Execute POST request
 			res = curl->Execute();
@@ -355,7 +360,7 @@ public:
 		curl_easy_getinfo(*curl, CURLINFO_RESPONSE_CODE, &request_info->response_code);
 		info.buffer_out = request_info->body;
 		// Construct HTTPResponse
-		return TransformResponseCurl( res);
+		return TransformResponseCurl(res);
 	}
 
 private:
@@ -402,7 +407,8 @@ private:
 		auto response = make_uniq<HTTPResponse>(status_code);
 		if (res != CURLcode::CURLE_OK) {
 			// TODO: request error can come from HTTPS Status code toString() value.
-			if (!request_info->header_collection.empty() && request_info->header_collection.back().HasHeader("__RESPONSE_STATUS__")) {
+			if (!request_info->header_collection.empty() &&
+			    request_info->header_collection.back().HasHeader("__RESPONSE_STATUS__")) {
 				response->request_error = request_info->header_collection.back().GetHeaderValue("__RESPONSE_STATUS__");
 			} else {
 				response->request_error = curl_easy_strerror(res);
@@ -410,7 +416,7 @@ private:
 			return response;
 		}
 		response->body = request_info->body;
-		response->url= request_info->url;
+		response->url = request_info->url;
 		if (!request_info->header_collection.empty()) {
 			for (auto &header : request_info->header_collection.back()) {
 				response->headers.Insert(header.first, header.second);
@@ -425,13 +431,7 @@ private:
 	optional_ptr<HTTPState> state;
 	unique_ptr<RequestInfo> request_info;
 
-	static std::mutex &GetRefLock() {
-		static std::mutex mtx;
-		return mtx;
-	}
-
 	static void InitCurlGlobal() {
-		GetRefLock();
 		if (httpfs_client_count == 0) {
 			curl_global_init(CURL_GLOBAL_DEFAULT);
 		}
@@ -441,7 +441,6 @@ private:
 	static void DestroyCurlGlobal() {
 		// TODO: when to call curl_global_cleanup()
 		// calling it on client destruction causes SSL errors when verification is on (due to many requests).
-		// GetRefLock();
 		// if (httpfs_client_count == 0) {
 		// 	throw InternalException("Destroying Httpfs client that did not initialize CURL");
 		// }
@@ -461,7 +460,8 @@ unordered_map<string, string> HTTPFSCurlUtil::ParseGetParameters(const string &t
 	unordered_map<std::string, std::string> params;
 
 	auto pos = text.find('?');
-	if (pos == std::string::npos) return params;
+	if (pos == std::string::npos)
+		return params;
 
 	std::string query = text.substr(pos + 1);
 	std::stringstream ss(query);
@@ -474,7 +474,7 @@ unordered_map<string, string> HTTPFSCurlUtil::ParseGetParameters(const string &t
 			std::string value = StringUtil::URLDecode(item.substr(eq_pos + 1));
 			params[key] = value;
 		} else {
-			params[item] = "";  // key with no value
+			params[item] = ""; // key with no value
 		}
 	}
 
