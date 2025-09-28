@@ -26,6 +26,7 @@ set(EXTENSION_SOURCES
     src/httpfs_curl_client.cpp
     src/httpfs_extension.cpp
     src/httpfs_httplib_client.cpp
+    src/multi_curl_engine.cpp
     src/quack_extension.cpp
     src/s3fs.cpp)
 

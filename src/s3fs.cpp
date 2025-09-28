@@ -89,7 +89,7 @@ static HTTPHeaders create_s3_header(string url, string query, string host, strin
 	if (use_sse_kms) {
 		signed_headers += ";x-amz-server-side-encryption;x-amz-server-side-encryption-aws-kms-key-id";
 	}
-    auto canonical_request = method + "\n" + S3FileSystem::UrlEncode(url) + "\n" + query;
+	auto canonical_request = method + "\n" + S3FileSystem::UrlEncode(url) + "\n" + query;
 	if (content_type.length() > 0) {
 		canonical_request += "\ncontent-type:" + content_type;
 	}
@@ -443,8 +443,8 @@ void S3FileSystem::FlushBuffer(S3FileHandle &file_handle, shared_ptr<S3WriteBuff
 	return;
 #endif
 
-       thread upload_thread(UploadBuffer, std::ref(file_handle), write_buffer);
-       upload_thread.detach();
+	thread upload_thread(UploadBuffer, std::ref(file_handle), write_buffer);
+	upload_thread.detach();
 }
 
 // Note that FlushAll currently does not allow to continue writing afterwards. Therefore, FinalizeMultipartUpload should
