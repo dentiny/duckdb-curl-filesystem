@@ -74,7 +74,8 @@ public:
 			Add(header);
 		}
 	}
-	CURLRequestHeaders() {}
+	CURLRequestHeaders() {
+	}
 
 	~CURLRequestHeaders() {
 		if (headers) {
@@ -98,6 +99,5 @@ public:
 struct HeaderCollector {
 	std::vector<HTTPHeaders> header_collection;
 };
-
 
 } // namespace duckdb

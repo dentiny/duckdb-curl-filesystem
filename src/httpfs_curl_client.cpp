@@ -13,17 +13,16 @@ namespace duckdb {
 // place curl will look. But not every distro has this file in the same location, so we search a
 // number of common locations and use the first one we find.
 static std::string certFileLocations[] = {
-	// Arch, Debian-based, Gentoo
-	"/etc/ssl/certs/ca-certificates.crt",
-	// RedHat 7 based
-	"/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
-	// Redhat 6 based
-	"/etc/pki/tls/certs/ca-bundle.crt",
-	// OpenSUSE
-	"/etc/ssl/ca-bundle.pem",
-	// Alpine
-	"/etc/ssl/cert.pem"};
-
+    // Arch, Debian-based, Gentoo
+    "/etc/ssl/certs/ca-certificates.crt",
+    // RedHat 7 based
+    "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+    // Redhat 6 based
+    "/etc/pki/tls/certs/ca-bundle.crt",
+    // OpenSUSE
+    "/etc/ssl/ca-bundle.pem",
+    // Alpine
+    "/etc/ssl/cert.pem"};
 
 //! Grab the first path that exists, from a list of well-known locations
 static std::string SelectCURLCertPath() {
@@ -40,15 +39,15 @@ static std::string cert_path = SelectCURLCertPath();
 
 static size_t RequestWriteCallback(void *contents, size_t size, size_t nmemb, void *userp) {
 	size_t totalSize = size * nmemb;
-	std::string* str = static_cast<std::string*>(userp);
-	str->append(static_cast<char*>(contents), totalSize);
+	std::string *str = static_cast<std::string *>(userp);
+	str->append(static_cast<char *>(contents), totalSize);
 	return totalSize;
 }
 
 static size_t RequestHeaderCallback(void *contents, size_t size, size_t nmemb, void *userp) {
 	size_t totalSize = size * nmemb;
-	std::string header(static_cast<char*>(contents), totalSize);
-	HeaderCollector* header_collection = static_cast<HeaderCollector*>(userp);
+	std::string header(static_cast<char *>(contents), totalSize);
+	HeaderCollector *header_collection = static_cast<HeaderCollector *>(userp);
 
 	// Trim trailing \r\n
 	if (!header.empty() && header.back() == '\n') {
@@ -82,7 +81,7 @@ static size_t RequestHeaderCallback(void *contents, size_t size, size_t nmemb, v
 	return totalSize;
 }
 
- CURLHandle::CURLHandle(const string &token, const string &cert_path) {
+CURLHandle::CURLHandle(const string &token, const string &cert_path) {
 	curl = curl_easy_init();
 	if (!curl) {
 		throw InternalException("Failed to initialize curl");
@@ -100,14 +99,12 @@ CURLHandle::~CURLHandle() {
 	curl_easy_cleanup(curl);
 }
 
-
 struct RequestInfo {
 	string url = "";
 	string body = "";
 	uint16_t response_code = 0;
 	std::vector<HTTPHeaders> header_collection;
 };
-
 
 static idx_t httpfs_client_count = 0;
 
@@ -136,11 +133,12 @@ public:
 		}
 
 		if (http_params.enable_curl_server_cert_verification) {
-			curl_easy_setopt(*curl, CURLOPT_SSL_VERIFYPEER, 1L);   // Verify the cert
-			curl_easy_setopt(*curl, CURLOPT_SSL_VERIFYHOST, 2L);   // Verify that the cert matches the hostname
+			curl_easy_setopt(*curl, CURLOPT_SSL_VERIFYPEER, 1L); // Verify the cert
+			curl_easy_setopt(*curl, CURLOPT_SSL_VERIFYHOST, 2L); // Verify that the cert matches the hostname
 		} else {
-			curl_easy_setopt(*curl, CURLOPT_SSL_VERIFYPEER, 0L);   // Override default, don't verify the cert
-			curl_easy_setopt(*curl, CURLOPT_SSL_VERIFYHOST, 0L);   // Override default, don't verify that the cert matches the hostname
+			curl_easy_setopt(*curl, CURLOPT_SSL_VERIFYPEER, 0L); // Override default, don't verify the cert
+			curl_easy_setopt(*curl, CURLOPT_SSL_VERIFYHOST,
+			                 0L); // Override default, don't verify that the cert matches the hostname
 		}
 
 		// set read timeout
@@ -160,7 +158,8 @@ public:
 		curl_easy_setopt(*curl, CURLOPT_WRITEDATA, &request_info->body);
 
 		if (!http_params.http_proxy.empty()) {
-			curl_easy_setopt(*curl, CURLOPT_PROXY, StringUtil::Format("%s:%s", http_params.http_proxy, http_params.http_proxy_port).c_str());
+			curl_easy_setopt(*curl, CURLOPT_PROXY,
+			                 StringUtil::Format("%s:%s", http_params.http_proxy, http_params.http_proxy_port).c_str());
 
 			if (!http_params.http_proxy_username.empty()) {
 				curl_easy_setopt(*curl, CURLOPT_PROXYUSERNAME, http_params.http_proxy_username.c_str());
@@ -197,7 +196,8 @@ public:
 		curl_easy_getinfo(*curl, CURLINFO_RESPONSE_CODE, &request_info->response_code);
 
 		idx_t bytes_received = 0;
-		if (!request_info->header_collection.empty() && request_info->header_collection.back().HasHeader("content-length")) {
+		if (!request_info->header_collection.empty() &&
+		    request_info->header_collection.back().HasHeader("content-length")) {
 			bytes_received = std::stoi(request_info->header_collection.back().GetHeaderValue("content-length"));
 			D_ASSERT(bytes_received == request_info->body.size());
 		} else {
@@ -207,9 +207,9 @@ public:
 			state->total_bytes_received += bytes_received;
 		}
 
-		const char* data = request_info->body.c_str();
+		const char *data = request_info->body.c_str();
 		if (info.content_handler) {
-			 info.content_handler(const_data_ptr_cast(data), bytes_received);
+			info.content_handler(const_data_ptr_cast(data), bytes_received);
 		}
 
 		return TransformResponseCurl(res);
@@ -317,7 +317,7 @@ public:
 
 		// Get HTTP response status code
 		curl_easy_getinfo(*curl, CURLINFO_RESPONSE_CODE, &request_info->response_code);
-		return TransformResponseCurl( res);
+		return TransformResponseCurl(res);
 	}
 
 	unique_ptr<HTTPResponse> Post(PostRequestInfo &info) override {
@@ -355,7 +355,7 @@ public:
 		curl_easy_getinfo(*curl, CURLINFO_RESPONSE_CODE, &request_info->response_code);
 		info.buffer_out = request_info->body;
 		// Construct HTTPResponse
-		return TransformResponseCurl( res);
+		return TransformResponseCurl(res);
 	}
 
 private:
@@ -402,7 +402,8 @@ private:
 		auto response = make_uniq<HTTPResponse>(status_code);
 		if (res != CURLcode::CURLE_OK) {
 			// TODO: request error can come from HTTPS Status code toString() value.
-			if (!request_info->header_collection.empty() && request_info->header_collection.back().HasHeader("__RESPONSE_STATUS__")) {
+			if (!request_info->header_collection.empty() &&
+			    request_info->header_collection.back().HasHeader("__RESPONSE_STATUS__")) {
 				response->request_error = request_info->header_collection.back().GetHeaderValue("__RESPONSE_STATUS__");
 			} else {
 				response->request_error = curl_easy_strerror(res);
@@ -410,7 +411,7 @@ private:
 			return response;
 		}
 		response->body = request_info->body;
-		response->url= request_info->url;
+		response->url = request_info->url;
 		if (!request_info->header_collection.empty()) {
 			for (auto &header : request_info->header_collection.back()) {
 				response->headers.Insert(header.first, header.second);
@@ -461,7 +462,8 @@ unordered_map<string, string> HTTPFSCurlUtil::ParseGetParameters(const string &t
 	unordered_map<std::string, std::string> params;
 
 	auto pos = text.find('?');
-	if (pos == std::string::npos) return params;
+	if (pos == std::string::npos)
+		return params;
 
 	std::string query = text.substr(pos + 1);
 	std::stringstream ss(query);
@@ -474,7 +476,7 @@ unordered_map<string, string> HTTPFSCurlUtil::ParseGetParameters(const string &t
 			std::string value = StringUtil::URLDecode(item.substr(eq_pos + 1));
 			params[key] = value;
 		} else {
-			params[item] = "";  // key with no value
+			params[item] = ""; // key with no value
 		}
 	}
 
