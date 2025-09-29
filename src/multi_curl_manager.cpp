@@ -224,15 +224,11 @@ void MultiCurlManager::HandleEvent() {
 
 unique_ptr<HTTPResponse> MultiCurlManager::HandleRequest(unique_ptr<EasyRequest> request) {
 	auto fut = request->done.get_future();
-
 	{
 		std::lock_guard<std::mutex> lck(global_info.mu);
 		curl_easy_setopt(request->easy, CURLOPT_PRIVATE, request.get());
 		CHECK_CURLM_OK(curl_multi_add_handle(global_info.multi, request->easy));
 	}
-
-	std::cerr << "multi add handle" << std::endl;
-
 	return fut.get();
 }
 
