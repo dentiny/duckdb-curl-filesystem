@@ -154,8 +154,8 @@ int sock_cb(CURL *e, curl_socket_t s, int what, void *cbp, void *sockp) {
 } // namespace
 
 /*static*/ MultiCurlManager &MultiCurlManager::GetInstance() {
-	static MultiCurlManager multi_curl_manager {};
-	return multi_curl_manager;
+	static auto *multi_curl_manager = new MultiCurlManager();
+	return *multi_curl_manager;
 }
 
 MultiCurlManager::MultiCurlManager() {
