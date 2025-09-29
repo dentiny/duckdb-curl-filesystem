@@ -1,4 +1,4 @@
-#include "multi_curl_engine.hpp"
+#include "multi_curl_manager.hpp"
 
 #include <array>
 #include <curl/curl.h>
@@ -152,6 +152,11 @@ int sock_cb(CURL *e, curl_socket_t s, int what, void *cbp, void *sockp) {
 	return 0;
 }
 } // namespace
+
+/*static*/ MultiCurlManager &MultiCurlManager::GetInstance() {
+	static auto *multi_curl_manager = new MultiCurlManager();
+	return *multi_curl_manager;
+}
 
 MultiCurlManager::MultiCurlManager() {
 	// Initialize epoll and timer.

@@ -1,5 +1,4 @@
 // MultiCurlManager is a class which wraps around events managed by multi-curl, and use epoll as polling engine.
-
 #pragma once
 
 #include <curl/curl.h>
@@ -10,14 +9,16 @@ namespace duckdb {
 
 class MultiCurlManager {
 public:
-	MultiCurlManager();
+	static MultiCurlManager &GetInstance();
 	~MultiCurlManager();
+
+	// Disable copy / move constructor / assignment.
 	MultiCurlManager(const MultiCurlManager &) = delete;
 	MultiCurlManager &operator=(const MultiCurlManager &) = delete;
-	MultiCurlManager(MultiCurlManager &&) = default;
-	MultiCurlManager &operator=(MultiCurlManager &&) = default;
 
 private:
+	MultiCurlManager();
+
 	// Poll and handle epoll events.
 	void HandleEvent();
 
