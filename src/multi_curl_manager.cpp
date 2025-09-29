@@ -66,10 +66,23 @@ void check_multi_info(struct GlobalInfo *global_info) {
 	while ((msg = curl_multi_info_read(global_info->multi, &msgs_left))) {
 		if (msg->msg == CURLMSG_DONE) {
 			CURL *easy = msg->easy_handle;
-			// TODO(hjiang): Handle error.
-			CURLcode res = msg->data.result;
-			// TODO(hjiang): Get private data structure, which contains promise for notification.
-			// curl_easy_getinfo(easy, CURLINFO_PRIVATE, &conn);
+			EasyRequest* request = nullptr;
+			curl_easy_getinfo(easy, CURLINFO_PRIVATE, request);
+
+			// Set response code.
+			long response_code = 0;
+			curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &response_code);
+			request->info->response_code = static_cast<uint16_t>(response_code);
+
+			// Set http response.
+			HTTPStatusCode code = HTTPUtil::ToStatusCode(request->info->response_code);
+			auto resp = make_uniq<HTTPResponse>(std::move(code));
+			resp->body = request->info->body;
+
+			// Mark request completion.
+			request->done.set_value(std::move(resp));
+			request->completed.store(true);
+
 			curl_multi_remove_handle(global_info->multi, easy);
 			curl_easy_cleanup(easy);
 		}
@@ -88,9 +101,7 @@ void timer_cb(struct GlobalInfo *global_info, int revents) {
 
 void event_cb(struct GlobalInfo *global_info, int fd, int revents) {
 	int action = ((revents & EPOLLIN) ? CURL_CSELECT_IN : 0) | ((revents & EPOLLOUT) ? CURL_CSELECT_OUT : 0);
-
 	CURLMcode rc = curl_multi_socket_action(global_info->multi, fd, action, &global_info->still_running);
-
 	check_multi_info(global_info);
 	if (global_info->still_running <= 0) {
 		struct itimerspec its;
@@ -223,6 +234,12 @@ void MultiCurlManager::HandleEvent() {
 			event_cb(&global_info, events[idx].data.fd, events[idx].events);
 		}
 	}
+}
+
+unique_ptr<HTTPResponse> MultiCurlManager::HandleRequest(unique_ptr<EasyRequest> request) {
+	auto fut = request->done.get_future();
+	CHECK_CURLM_OK(curl_multi_add_handle(multicurl, request->easy));
+	return fut.get();
 }
 
 } // namespace duckdb

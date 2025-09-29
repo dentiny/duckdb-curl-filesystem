@@ -5,6 +5,9 @@
 
 #include <thread>
 
+#include "curl_request.hpp"
+#include "duckdb/common/unique_ptr.hpp"
+
 namespace duckdb {
 
 class MultiCurlManager {
@@ -15,6 +18,9 @@ public:
 	// Disable copy / move constructor / assignment.
 	MultiCurlManager(const MultiCurlManager &) = delete;
 	MultiCurlManager &operator=(const MultiCurlManager &) = delete;
+
+	// Handle HTTP request, block wait until its completion.
+	unique_ptr<HTTPResponse> HandleRequest(unique_ptr<EasyRequest> request);
 
 private:
 	MultiCurlManager();
