@@ -22,9 +22,18 @@ TEST_CASE("multi-curl test", "[curl test]") {
 
     auto request = make_uniq<EasyRequest>();
     request->info->url = "https://raw.githubusercontent.com/dentiny/duck-read-cache-fs/main/test/data/stock-exchanges.csv";
-    auto response = MultiCurlManager::GetInstance().HandleRequest(std::move(request));
+    
+    // Set the URL on the curl easy handle
+    curl_easy_setopt(request->easy, CURLOPT_URL, request->info->url.c_str());
+    
+    auto& multi_curl_manager = MultiCurlManager::GetInstance();
 
-    std::cout << "Reponse body = " << response->body << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+    
+    
+    auto response = multi_curl_manager.HandleRequest(std::move(request));
+
+    std::cout << "Response body = " << response->body << std::endl;
 }
 
 int main(int argc, char **argv) {

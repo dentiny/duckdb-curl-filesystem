@@ -7,8 +7,8 @@ namespace duckdb {
 	auto *req = static_cast<EasyRequest *>(userp);
 	req->info->body.append(static_cast<char *>(contents), total_size);
 	if (req->get_info && req->get_info->content_handler) {
-		req->get_info->content_handler(const_data_ptr_cast(req->info->body.data() + req->info->body.size() - total_size),
-		                               total_size);
+		req->get_info->content_handler(
+		    const_data_ptr_cast(req->info->body.data() + req->info->body.size() - total_size), total_size);
 	}
 	return total_size;
 }

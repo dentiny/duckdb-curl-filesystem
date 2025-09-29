@@ -10,10 +10,20 @@
 
 namespace duckdb {
 
+struct GlobalInfo {
+	int epoll_fd;
+	int timer_fd;
+	CURLM *multi = nullptr;
+	// Used to protect concurrent access against multi-curl, which is not thread-safe.
+	std::mutex mu;
+	int still_running = 0;
+};
+
 class MultiCurlManager {
 public:
 	static MultiCurlManager &GetInstance();
-	~MultiCurlManager();
+	// Never destructs.
+	~MultiCurlManager() = default;
 
 	// Disable copy / move constructor / assignment.
 	MultiCurlManager(const MultiCurlManager &) = delete;
@@ -28,10 +38,7 @@ private:
 	// Poll and handle epoll events.
 	void HandleEvent();
 
-	int epoll_fd = -1;
-	int timer_fd = -1;
-	CURLM *multicurl = nullptr;
-
+	GlobalInfo global_info;
 	// Background thread to handle all events.
 	std::thread bkg_thread;
 };

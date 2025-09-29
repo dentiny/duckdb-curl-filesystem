@@ -33,13 +33,13 @@ struct EasyRequest {
 			throw InternalException("Failed to initialize curl easy");
 		}
 
-        curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, EasyRequest::WriteBody);
-        curl_easy_setopt(easy, CURLOPT_WRITEDATA, this);
+		curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, EasyRequest::WriteBody);
+		curl_easy_setopt(easy, CURLOPT_WRITEDATA, this);
 
-        curl_easy_setopt(easy, CURLOPT_HEADERFUNCTION, EasyRequest::WriteHeader);
-        curl_easy_setopt(easy, CURLOPT_HEADERDATA, this);
+		curl_easy_setopt(easy, CURLOPT_HEADERFUNCTION, EasyRequest::WriteHeader);
+		curl_easy_setopt(easy, CURLOPT_HEADERDATA, this);
 
-        curl_easy_setopt(easy, CURLOPT_PRIVATE, this);
+		curl_easy_setopt(easy, CURLOPT_PRIVATE, this);
 	}
 	~EasyRequest() {
 		if (headers) {
