@@ -153,6 +153,11 @@ int sock_cb(CURL *e, curl_socket_t s, int what, void *cbp, void *sockp) {
 }
 } // namespace
 
+/*static*/ MultiCurlManager &MultiCurlManager::GetInstance() {
+	static MultiCurlManager multi_curl_manager {};
+	return multi_curl_manager;
+}
+
 MultiCurlManager::MultiCurlManager() {
 	// Initialize epoll and timer.
 	epoll_fd = epoll_create1(EPOLL_CLOEXEC);
