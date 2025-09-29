@@ -20,17 +20,10 @@ size_t WriteCallback(char* ptr, size_t size, size_t nmemb, void* userdata) {
 TEST_CASE("multi-curl test", "[curl test]") {
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
-    auto request = make_uniq<EasyRequest>();
-    request->info->url = "https://raw.githubusercontent.com/dentiny/duck-read-cache-fs/main/test/data/stock-exchanges.csv";
-    
-    // Set the URL on the curl easy handle
-    curl_easy_setopt(request->easy, CURLOPT_URL, request->info->url.c_str());
-    
-    auto& multi_curl_manager = MultiCurlManager::GetInstance();
+    string url = "https://raw.githubusercontent.com/dentiny/duck-read-cache-fs/main/test/data/stock-exchanges.csv";
+    auto request = make_uniq<EasyRequest>(std::move(url));
 
-    std::this_thread::sleep_for(std::chrono::seconds(3));
-    
-    
+    auto& multi_curl_manager = MultiCurlManager::GetInstance();    
     auto response = multi_curl_manager.HandleRequest(std::move(request));
 
     std::cout << "Response body = " << response->body << std::endl;

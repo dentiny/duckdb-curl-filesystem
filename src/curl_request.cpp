@@ -1,6 +1,40 @@
 #include "curl_request.hpp"
 
+#include <iostream>
+
 namespace duckdb {
+
+EasyRequest::EasyRequest(string url) : info(make_uniq<RequestInfo>()) {
+	info->url = std::move(url);
+	easy = curl_easy_init();
+	if (easy == nullptr) {
+		throw InternalException("Failed to initialize curl easy");
+	}
+
+	curl_easy_setopt(easy, CURLOPT_URL, info->url.c_str());
+	curl_easy_setopt(easy, CURLOPT_PROGRESSFUNCTION, EasyRequest::ProgressCallback);
+	curl_easy_setopt(easy, CURLOPT_PROGRESSDATA, this);
+
+	curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, EasyRequest::WriteBody);
+	curl_easy_setopt(easy, CURLOPT_WRITEDATA, this);
+
+	curl_easy_setopt(easy, CURLOPT_HEADERFUNCTION, EasyRequest::WriteHeader);
+	curl_easy_setopt(easy, CURLOPT_HEADERDATA, this);
+
+	curl_easy_setopt(easy, CURLOPT_PRIVATE, this);
+
+	// For debugging purpose.
+	curl_easy_setopt(easy, CURLOPT_VERBOSE, 1L);
+}
+
+EasyRequest::~EasyRequest() {
+	if (headers != nullptr) {
+		curl_slist_free_all(headers);
+	}
+	if (easy != nullptr) {
+		curl_easy_cleanup(easy);
+	}
+}
 
 /*static*/ size_t EasyRequest::WriteBody(void *contents, size_t size, size_t nmemb, void *userp) {
 	size_t total_size = size * nmemb;
@@ -41,6 +75,11 @@ namespace duckdb {
 		req->info->header_collection.back().Insert(k, v);
 	}
 	return total_size;
+}
+
+/*static*/ int EasyRequest::ProgressCallback(void *p, double dltotal, double dlnow, double ult, double uln) {
+	std::cerr << "Progress: " << dlnow << dltotal << std::endl;
+	;
 }
 
 } // namespace duckdb

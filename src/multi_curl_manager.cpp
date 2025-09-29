@@ -27,7 +27,6 @@ struct SockInfo {
 	long timeout = 0;
 	GlobalInfo *global = nullptr;
 };
-
 int MultiTimerCallback(CURLM *multi, long timeout_ms, struct GlobalInfo *global_info) {
 	struct itimerspec its;
 
@@ -56,10 +55,9 @@ int MultiTimerCallback(CURLM *multi, long timeout_ms, struct GlobalInfo *global_
 
 // Retrieve completed IO operations and invoke callback.
 void CheckMultiWithNoLock(struct GlobalInfo *global_info) {
-	std::lock_guard<std::mutex> lck(global_info->mu);
-
 	CURLMsg *msg = nullptr;
 	int msgs_left = 0;
+
 	while ((msg = curl_multi_info_read(global_info->multi, &msgs_left))) {
 		if (msg->msg == CURLMSG_DONE) {
 			CURL *easy = msg->easy_handle;
@@ -93,14 +91,14 @@ void TimerCallback(struct GlobalInfo *global_info, int revents) {
 	int ret = read(global_info->timer_fd, &count, sizeof(uint64_t));
 	SYSCALL_THROW_IF_ERROR(ret);
 
-	CURLMcode rc = curl_multi_socket_action(global_info->multi, CURL_SOCKET_TIMEOUT, 0, &global_info->still_running);
+	CHECK_CURLM_OK(curl_multi_socket_action(global_info->multi, CURL_SOCKET_TIMEOUT, 0, &global_info->still_running));
 	CheckMultiWithNoLock(global_info);
 }
 
-void FsEventCallback(struct GlobalInfo *global_info, int fd, int revents) {
+void FdEventCallback(struct GlobalInfo *global_info, int fd, int revents) {
 	std::lock_guard<std::mutex> lck(global_info->mu);
 	int action = ((revents & EPOLLIN) ? CURL_CSELECT_IN : 0) | ((revents & EPOLLOUT) ? CURL_CSELECT_OUT : 0);
-	CURLMcode rc = curl_multi_socket_action(global_info->multi, fd, action, &global_info->still_running);
+	CHECK_CURLM_OK(curl_multi_socket_action(global_info->multi, fd, action, &global_info->still_running));
 	CheckMultiWithNoLock(global_info);
 	if (global_info->still_running <= 0) {
 		struct itimerspec its;
@@ -208,15 +206,23 @@ void MultiCurlManager::HandleEvent() {
 
 	// Run the event loop continuously
 	while (true) {
+		// TODO(hjiang): Should block indefinitely.
 		const int count =
-		    epoll_wait(global_info.epoll_fd, events.data(), sizeof(events) / sizeof(epoll_event), /*timeout=*/-1);
+		    epoll_wait(global_info.epoll_fd, events.data(), sizeof(events) / sizeof(epoll_event), /*timeout=*/10000);
 		SYSCALL_EXIT_IF_ERROR(count);
+
+		if (count == 0) {
+			// If no events, check multi info in case transfers completed
+			std::lock_guard<std::mutex> lck(global_info.mu);
+			CheckMultiWithNoLock(&global_info);
+			continue;
+		}
 
 		for (int idx = 0; idx < count; ++idx) {
 			if (events[idx].data.fd == global_info.timer_fd) {
 				TimerCallback(&global_info, events[idx].events);
 			} else {
-				FsEventCallback(&global_info, events[idx].data.fd, events[idx].events);
+				FdEventCallback(&global_info, events[idx].data.fd, events[idx].events);
 			}
 		}
 	}
@@ -224,11 +230,12 @@ void MultiCurlManager::HandleEvent() {
 
 unique_ptr<HTTPResponse> MultiCurlManager::HandleRequest(unique_ptr<EasyRequest> request) {
 	auto fut = request->done.get_future();
+
 	{
 		std::lock_guard<std::mutex> lck(global_info.mu);
-		curl_easy_setopt(request->easy, CURLOPT_PRIVATE, request.get());
 		CHECK_CURLM_OK(curl_multi_add_handle(global_info.multi, request->easy));
 	}
+
 	return fut.get();
 }
 

@@ -27,29 +27,10 @@ struct EasyRequest {
 	optional_ptr<HTTPState> state = nullptr;
 	GetRequestInfo *get_info = nullptr;
 
-	EasyRequest() : info(make_uniq<RequestInfo>()) {
-		easy = curl_easy_init();
-		if (easy == nullptr) {
-			throw InternalException("Failed to initialize curl easy");
-		}
+	EasyRequest(string url);
+	~EasyRequest();
 
-		curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, EasyRequest::WriteBody);
-		curl_easy_setopt(easy, CURLOPT_WRITEDATA, this);
-
-		curl_easy_setopt(easy, CURLOPT_HEADERFUNCTION, EasyRequest::WriteHeader);
-		curl_easy_setopt(easy, CURLOPT_HEADERDATA, this);
-
-		curl_easy_setopt(easy, CURLOPT_PRIVATE, this);
-	}
-	~EasyRequest() {
-		if (headers) {
-			curl_slist_free_all(headers);
-		}
-		if (easy) {
-			curl_easy_cleanup(easy);
-		}
-	}
-
+	static int ProgressCallback(void *p, double dltotal, double dlnow, double ult, double uln);
 	static size_t WriteBody(void *contents, size_t size, size_t nmemb, void *userp);
 	static size_t WriteHeader(void *contents, size_t size, size_t nmemb, void *userp);
 };
