@@ -5,7 +5,9 @@
 
 #include <curl/curl.h>
 #include <sys/stat.h>
+
 #include "duckdb/common/exception/http_exception.hpp"
+#include "multi_curl_manager.hpp"
 
 namespace duckdb {
 
@@ -173,47 +175,39 @@ public:
 	}
 
 	unique_ptr<HTTPResponse> Get(GetRequestInfo &info) override {
-		if (state) {
-			state->get_count++;
-		}
+       if (state) {
+           state->get_count++;
+       }
 
-		auto curl_headers = TransformHeadersCurl(info.headers);
-		request_info->url = info.url;
-		if (!info.params.extra_headers.empty()) {
-			auto curl_params = TransformParamsCurl(info.params);
-			request_info->url += "?" + curl_params;
-		}
+       auto curl_headers = TransformHeadersCurl(info.headers);
+       request_info->url = info.url;
+       if (!info.params.extra_headers.empty()) {
+	        auto curl_params = TransformParamsCurl(info.params);
+           request_info->url += "?" + curl_params;
+       }
 
-		CURLcode res;
-		{
-			// If the same handle served a HEAD request, we must set NOBODY back to 0L to request content again
-			curl_easy_setopt(*curl, CURLOPT_NOBODY, 0L);
-			curl_easy_setopt(*curl, CURLOPT_URL, request_info->url.c_str());
-			curl_easy_setopt(*curl, CURLOPT_HTTPHEADER, curl_headers ? curl_headers.headers : nullptr);
-			res = curl->Execute();
-		}
+       // Build CurlRequest object that MultiCurlManager understands
+       auto req = make_uniq<CurlRequest>();
+       req->easy_curl = *curl;
+       curl_easy_setopt(*curl, CURLOPT_NOBODY, 0L);
+       curl_easy_setopt(*curl, CURLOPT_URL, request_info->url.c_str());
+       curl_easy_setopt(*curl, CURLOPT_HTTPHEADER,
+                        curl_headers ? curl_headers.headers : nullptr);
 
-		curl_easy_getinfo(*curl, CURLINFO_RESPONSE_CODE, &request_info->response_code);
+       auto response = MultiCurlManager::GetInstance().HandleRequest(std::move(req));
 
-		idx_t bytes_received = 0;
-		if (!request_info->header_collection.empty() &&
-		    request_info->header_collection.back().HasHeader("content-length")) {
-			bytes_received = std::stoi(request_info->header_collection.back().GetHeaderValue("content-length"));
-			D_ASSERT(bytes_received == request_info->body.size());
-		} else {
-			bytes_received = request_info->body.size();
-		}
-		if (state) {
-			state->total_bytes_received += bytes_received;
-		}
+       // Account statistics
+       if (state) {
+           state->total_bytes_received += response->body.size();
+       }
 
-		const char *data = request_info->body.c_str();
-		if (info.content_handler) {
-			info.content_handler(const_data_ptr_cast(data), bytes_received);
-		}
+       if (info.content_handler) {
+           info.content_handler(const_data_ptr_cast(response->body.c_str()),
+                                response->body.size());
+       }
 
-		return TransformResponseCurl(res);
-	}
+       return response;
+   }
 
 	unique_ptr<HTTPResponse> Put(PutRequestInfo &info) override {
 		if (state) {
@@ -258,30 +252,22 @@ public:
 
 		auto curl_headers = TransformHeadersCurl(info.headers);
 		request_info->url = info.url;
-		// transform parameters
 		if (!info.params.extra_headers.empty()) {
 			auto curl_params = TransformParamsCurl(info.params);
 			request_info->url += "?" + curl_params;
 		}
 
-		CURLcode res;
-		{
-			// Set URL
-			curl_easy_setopt(*curl, CURLOPT_URL, request_info->url.c_str());
+		auto req = make_uniq<CurlRequest>();
+		req->easy_curl = *curl;
 
-			// Perform HEAD request instead of GET
-			curl_easy_setopt(*curl, CURLOPT_NOBODY, 1L);
-			curl_easy_setopt(*curl, CURLOPT_HTTPGET, 0L);
+		curl_easy_setopt(*curl, CURLOPT_URL, request_info->url.c_str());
+		curl_easy_setopt(*curl, CURLOPT_NOBODY, 1L);
+		curl_easy_setopt(*curl, CURLOPT_HTTPGET, 0L);
+		curl_easy_setopt(*curl, CURLOPT_HTTPHEADER,
+						curl_headers ? curl_headers.headers : nullptr);
 
-			// Add headers if any
-			curl_easy_setopt(*curl, CURLOPT_HTTPHEADER, curl_headers ? curl_headers.headers : nullptr);
-
-			// Execute HEAD request
-			res = curl->Execute();
-		}
-
-		curl_easy_getinfo(*curl, CURLINFO_RESPONSE_CODE, &request_info->response_code);
-		return TransformResponseCurl(res);
+		auto response = MultiCurlManager::GetInstance().HandleRequest(std::move(req));
+		return response;
 	}
 
 	unique_ptr<HTTPResponse> Delete(DeleteRequestInfo &info) override {
