@@ -21,7 +21,7 @@ struct CurlRequest {
 	unique_ptr<RequestInfo> info;
 	std::promise<unique_ptr<HTTPResponse>> done;
 	std::atomic<bool> completed {false};
-	CURL *easy = nullptr;
+	CURL *easy_curl = nullptr;
 
 	explicit CurlRequest(std::string url);
 	~CurlRequest();

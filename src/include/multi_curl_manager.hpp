@@ -2,17 +2,15 @@
 
 #include <curl/curl.h>
 #include <future>
-#include <memory>
 #include <mutex>
-#include <queue>
 #include <thread>
-#include <unordered_map>
-#include <vector>
 
-#include "duckdb/common/unique_ptr.hpp"
 #include "curl_request.hpp"
-#include "duckdb/common/http_util.hpp"
 #include "duckdb/common/helper.hpp"
+#include "duckdb/common/http_util.hpp"
+#include "duckdb/common/queue.hpp"
+#include "duckdb/common/unique_ptr.hpp"
+#include "duckdb/common/unordered_map.hpp"
 
 namespace duckdb {
 
@@ -29,20 +27,25 @@ public:
 	static MultiCurlManager &GetInstance();
 	~MultiCurlManager() = default;
 
+	// Disable copy / move constructor / assignment.
 	MultiCurlManager(const MultiCurlManager &) = delete;
 	MultiCurlManager &operator=(const MultiCurlManager &) = delete;
 
+	// Handle the given request, and block wait until its completion.
 	unique_ptr<HTTPResponse> HandleRequest(unique_ptr<CurlRequest> request);
 
 private:
 	MultiCurlManager();
 
+	// Epoll-based eventloop.
 	void HandleEvent();
+	// Process all pending requests and bind easy curl handle with multi curl handle.
 	void ProcessPendingRequests();
 
 	unique_ptr<GlobalInfo> global_info;
-	std::queue<unique_ptr<CurlRequest>> pending_requests_;
-	std::unordered_map<CURL *, unique_ptr<CurlRequest>> ongoing_requests_;
+	queue<unique_ptr<CurlRequest>> pending_requests;
+	unordered_map<CURL *, unique_ptr<CurlRequest>> ongoing_requests;
+	// Background thread which keeps polling with polling engine.
 	std::thread bkg_thread;
 };
 

@@ -2,13 +2,13 @@
 
 #include <array>
 #include <cstring>
-#include <iostream>
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
 #include <unistd.h>
 
-#include "duckdb/common/unique_ptr.hpp"
 #include "duckdb/common/helper.hpp"
+#include "duckdb/common/unique_ptr.hpp"
+#include "syscall_macros.hpp"
 
 namespace duckdb {
 
@@ -147,12 +147,10 @@ int MultiTimerCallback(CURLM *multi, long timeout_ms, GlobalInfo *g) {
 
 MultiCurlManager::MultiCurlManager() : global_info(make_uniq<GlobalInfo>()) {
 	int epfd = epoll_create1(EPOLL_CLOEXEC);
-	if (epfd == -1)
-		throw std::runtime_error("epoll_create1 failed");
+	SYSCALL_EXIT_IF_ERROR(epfd);
 
 	int tfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
-	if (tfd == -1)
-		throw std::runtime_error("timerfd_create failed");
+	SYSCALL_EXIT_IF_ERROR(tfd);
 
 	struct itimerspec its;
 	memset(&its, 0, sizeof(its));
@@ -181,10 +179,10 @@ void MultiCurlManager::HandleEvent() {
 	while (true) {
 		int nfds = epoll_wait(global_info->epoll_fd, events.data(), events.size(), 1000);
 		if (nfds < 0) {
-			if (errno == EINTR)
+			if (errno == EINTR) {
 				continue;
-			perror("epoll_wait");
-			break;
+			}
+			SYSCALL_THROW_IF_ERROR(nfds);
 		}
 		for (int i = 0; i < nfds; i++) {
 			if (events[i].data.fd == global_info->timer_fd) {
@@ -198,15 +196,18 @@ void MultiCurlManager::HandleEvent() {
 }
 
 void MultiCurlManager::ProcessPendingRequests() {
-	while (!pending_requests_.empty()) {
-		auto req = std::move(pending_requests_.front());
-		pending_requests_.pop();
+	while (!pending_requests.empty()) {
+		auto req = std::move(pending_requests.front());
+		pending_requests.pop();
+		auto *req_ptr = req.get();
 
-		CURL *easy = req->easy;
-		ongoing_requests_[easy] = std::move(req);
+		CURL *easy_curl = req->easy_curl;
+		auto iter = ongoing_requests.find(easy_curl);
+		D_ASSERT(iter == ongoing_requests.end());
+		ongoing_requests[easy_curl] = std::move(req);
 
-		curl_easy_setopt(easy, CURLOPT_PRIVATE, ongoing_requests_[easy].get());
-		curl_multi_add_handle(global_info->multi, easy);
+		curl_easy_setopt(easy_curl, CURLOPT_PRIVATE, req_ptr);
+		curl_multi_add_handle(global_info->multi, easy_curl);
 	}
 }
 
@@ -214,7 +215,7 @@ unique_ptr<HTTPResponse> MultiCurlManager::HandleRequest(unique_ptr<CurlRequest>
 	auto fut = request->done.get_future();
 	{
 		std::lock_guard<std::mutex> lck(global_info->mu);
-		pending_requests_.emplace(std::move(request));
+		pending_requests.emplace(std::move(request));
 	}
 	return fut.get();
 }
