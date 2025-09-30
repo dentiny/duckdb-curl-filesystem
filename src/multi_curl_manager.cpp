@@ -10,6 +10,8 @@
 #include "duckdb/common/unique_ptr.hpp"
 #include "syscall_macros.hpp"
 
+#include <iostream>
+
 namespace duckdb {
 
 namespace {
@@ -40,7 +42,7 @@ void CheckMulti(GlobalInfo *g) {
 		auto resp = make_uniq<HTTPResponse>(status_code);
 		resp->body = req->info->body;
 		resp->url = req->info->url;
-		req->done.set_value(std::move(resp));
+		req->response.set_value(std::move(resp));
 
 		curl_multi_remove_handle(g->multi, easy);
 		auto iter = g->ongoing_requests.find(easy);
@@ -186,7 +188,8 @@ MultiCurlManager::MultiCurlManager() : global_info(make_uniq<GlobalInfo>()) {
 void MultiCurlManager::HandleEvent() {
 	std::array<epoll_event, 32> events {};
 	while (true) {
-		const int nfds = epoll_wait(global_info->epoll_fd, events.data(), events.size(), /*timeout=*/-1);
+		// TODO(hjiang): Use wakefd for notification, instead of epoll timeout.
+		const int nfds = epoll_wait(global_info->epoll_fd, events.data(), events.size(), /*timeout=*/1000);
 		if (nfds < 0) {
 			if (errno == EINTR) {
 				continue;
@@ -227,12 +230,12 @@ void MultiCurlManager::ProcessPendingRequests() {
 }
 
 unique_ptr<HTTPResponse> MultiCurlManager::HandleRequest(unique_ptr<CurlRequest> request) {
-	auto fut = request->done.get_future();
+	auto resp_fut = request->response.get_future();
 	{
 		std::lock_guard<std::mutex> lck(mu);
 		pending_requests.emplace(std::move(request));
 	}
-	return fut.get();
+	return resp_fut.get();
 }
 
 } // namespace duckdb

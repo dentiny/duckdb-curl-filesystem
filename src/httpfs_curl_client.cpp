@@ -10,6 +10,8 @@
 #include "duckdb/common/exception/http_exception.hpp"
 #include "multi_curl_manager.hpp"
 
+#include <iostream>
+
 namespace duckdb {
 
 // we statically compile in libcurl, which means the cert file location of the build machine is the
@@ -170,39 +172,31 @@ public:
 	}
 
 	unique_ptr<HTTPResponse> Get(GetRequestInfo &info) override {
-       if (state) {
-           state->get_count++;
-       }
+		if (state) {
+			state->get_count++;
+		}
 
-       auto curl_headers = TransformHeadersCurl(info.headers);
-       request_info->url = info.url;
-       if (!info.params.extra_headers.empty()) {
-	        auto curl_params = TransformParamsCurl(info.params);
-           request_info->url += "?" + curl_params;
-       }
+		auto curl_headers = TransformHeadersCurl(info.headers);
+		string url = info.url;
+		if (!info.params.extra_headers.empty()) {
+			auto curl_params = TransformParamsCurl(info.params);
+			url += "?" + curl_params;
+		}
 
-       // Build CurlRequest object that MultiCurlManager understands
-       auto req = make_uniq<CurlRequest>();
-       req->easy_curl = *curl;
-       curl_easy_setopt(*curl, CURLOPT_NOBODY, 0L);
-       curl_easy_setopt(*curl, CURLOPT_URL, request_info->url.c_str());
-       curl_easy_setopt(*curl, CURLOPT_HTTPHEADER,
-                        curl_headers ? curl_headers.headers : nullptr);
+		auto req = make_uniq<CurlRequest>(*curl);
+		req->SetUrl(std::move(url));
+		req->SetHeaders(curl_headers.headers);
+		req->SetGetAttrs();
 
-       auto response = MultiCurlManager::GetInstance().HandleRequest(std::move(req));
-
-       // Account statistics
-       if (state) {
-           state->total_bytes_received += response->body.size();
-       }
-
-       if (info.content_handler) {
-           info.content_handler(const_data_ptr_cast(response->body.c_str()),
-                                response->body.size());
-       }
-
-       return response;
-   }
+		auto response = MultiCurlManager::GetInstance().HandleRequest(std::move(req));
+		if (state) {
+			state->total_bytes_received += response->body.size();
+		}
+		if (info.content_handler) {
+			info.content_handler(const_data_ptr_cast(response->body.c_str()), response->body.size());
+		}
+		return response;
+	}
 
 	unique_ptr<HTTPResponse> Put(PutRequestInfo &info) override {
 		if (state) {
@@ -246,20 +240,16 @@ public:
 		}
 
 		auto curl_headers = TransformHeadersCurl(info.headers);
-		request_info->url = info.url;
+		string url = info.url;
 		if (!info.params.extra_headers.empty()) {
 			auto curl_params = TransformParamsCurl(info.params);
-			request_info->url += "?" + curl_params;
+			url += "?" + curl_params;
 		}
 
-		auto req = make_uniq<CurlRequest>();
-		req->easy_curl = *curl;
-
-		curl_easy_setopt(*curl, CURLOPT_URL, request_info->url.c_str());
-		curl_easy_setopt(*curl, CURLOPT_NOBODY, 1L);
-		curl_easy_setopt(*curl, CURLOPT_HTTPGET, 0L);
-		curl_easy_setopt(*curl, CURLOPT_HTTPHEADER,
-						curl_headers ? curl_headers.headers : nullptr);
+		auto req = make_uniq<CurlRequest>(*curl);
+		req->SetUrl(std::move(url));
+		req->SetHeaders(curl_headers.headers);
+		req->SetHeadAttrs();
 
 		auto response = MultiCurlManager::GetInstance().HandleRequest(std::move(req));
 		return response;

@@ -4,12 +4,7 @@
 
 namespace duckdb {
 
-CurlRequest::CurlRequest(std::string url) : info(make_uniq<RequestInfo>()) {
-	info->url = std::move(url);
-	easy_curl = curl_easy_init();
-	D_ASSERT(easy != nullptr);
-
-	curl_easy_setopt(easy_curl, CURLOPT_URL, info->url.c_str());
+CurlRequest::CurlRequest(CURL *easy_curl_p) : info(make_uniq<RequestInfo>()), easy_curl(easy_curl_p) {
 	curl_easy_setopt(easy_curl, CURLOPT_HEADERFUNCTION, CurlRequest::WriteHeader);
 	curl_easy_setopt(easy_curl, CURLOPT_HEADERDATA, this);
 	curl_easy_setopt(easy_curl, CURLOPT_WRITEFUNCTION, CurlRequest::WriteBody);
@@ -19,9 +14,24 @@ CurlRequest::CurlRequest(std::string url) : info(make_uniq<RequestInfo>()) {
 	// curl_easy_setopt(easy, CURLOPT_VERBOSE, 1L);
 }
 
-CurlRequest::~CurlRequest() {
-	D_ASSERT(easy_curl != nullptr);
-	curl_easy_cleanup(easy_curl);
+CurlRequest::~CurlRequest() = default;
+
+void CurlRequest::SetUrl(string url) {
+	curl_easy_setopt(easy_curl, CURLOPT_URL, url.c_str());
+	info->url = std::move(url);
+}
+void CurlRequest::SetHeaders(curl_slist *headers) {
+	if (headers != nullptr) {
+		curl_easy_setopt(easy_curl, CURLOPT_HTTPHEADER, headers);
+	}
+}
+
+void CurlRequest::SetGetAttrs() {
+	curl_easy_setopt(easy_curl, CURLOPT_NOBODY, 0L);
+}
+void CurlRequest::SetHeadAttrs() {
+	curl_easy_setopt(easy_curl, CURLOPT_NOBODY, 1L);
+	curl_easy_setopt(easy_curl, CURLOPT_HTTPGET, 0L);
 }
 
 /*static*/ size_t CurlRequest::WriteHeader(void *contents, size_t size, size_t nmemb, void *userp) {
