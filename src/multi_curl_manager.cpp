@@ -13,6 +13,10 @@
 namespace duckdb {
 
 namespace {
+
+// Max number of TCP connections established per host.
+constexpr long DEFAULT_MAX_CONN_PER_HOST = 8;
+
 struct SockInfo {
 	curl_socket_t sockfd = 0;
 	CURL *easy = nullptr;
@@ -175,6 +179,7 @@ MultiCurlManager::MultiCurlManager() : global_info(make_uniq<GlobalInfo>()) {
 	global_info->timer_fd = timer_fd;
 	global_info->multi = curl_multi_init();
 
+	curl_multi_setopt(global_info->multi, CURLMOPT_MAX_HOST_CONNECTIONS, DEFAULT_MAX_CONN_PER_HOST);
 	curl_multi_setopt(global_info->multi, CURLMOPT_SOCKETFUNCTION, SocketCallback);
 	curl_multi_setopt(global_info->multi, CURLMOPT_SOCKETDATA, global_info.get());
 	curl_multi_setopt(global_info->multi, CURLMOPT_TIMERFUNCTION, MultiTimerCallback);
