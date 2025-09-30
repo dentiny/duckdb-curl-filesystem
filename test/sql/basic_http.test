@@ -1,0 +1,10 @@
+# name: test/sql/basic_http.test
+# description: test basic httpfs functionality
+# group: [sql]
+
+require curl_httpfs
+
+query I
+SELECT length(content) AS char_count FROM read_text('https://raw.githubusercontent.com/dentiny/duck-read-cache-fs/main/test/data/stock-exchanges.csv');
+----
+16205
