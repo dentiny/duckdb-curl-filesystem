@@ -83,13 +83,13 @@ static void LoadInternal(ExtensionLoader &loader) {
 			throw InvalidInputException("Unsupported option for httpfs_client_implementation, only `wasm` and "
 			                            "`default` are currently supported for duckdb-wasm");
 		}
-		if (value == "curl") {
+		if (value == "curl" || value == "default") {
 			if (!config.http_util || config.http_util->GetName() != "HTTPFSUtil-Curl") {
 				config.http_util = make_shared_ptr<HTTPFSCurlUtil>();
 			}
 			return;
 		}
-		if (value == "httplib" || value == "default") {
+		if (value == "httplib") {
 			if (!config.http_util || config.http_util->GetName() != "HTTPFSUtil") {
 				config.http_util = make_shared_ptr<HTTPFSUtil>();
 			}
@@ -104,7 +104,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	if (config.http_util && config.http_util->GetName() == "WasmHTTPUtils") {
 		// Already handled, do not override
 	} else {
-		config.http_util = make_shared_ptr<HTTPFSUtil>();
+		config.http_util = make_shared_ptr<HTTPFSCurlUtil>();
 	}
 
 	auto provider = make_uniq<AWSEnvironmentCredentialsProvider>(config);
