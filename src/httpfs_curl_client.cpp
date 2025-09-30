@@ -6,6 +6,7 @@
 #include <curl/curl.h>
 #include <sys/stat.h>
 
+#include "curl_request.hpp"
 #include "duckdb/common/exception/http_exception.hpp"
 #include "multi_curl_manager.hpp"
 
@@ -39,6 +40,7 @@ static std::string SelectCURLCertPath() {
 
 static std::string cert_path = SelectCURLCertPath();
 
+// TODO(hjiang): Move content and header write callback to [`CurlRequest`].
 static size_t RequestWriteCallback(void *contents, size_t size, size_t nmemb, void *userp) {
 	size_t totalSize = size * nmemb;
 	std::string *str = static_cast<std::string *>(userp);
@@ -100,13 +102,6 @@ CURLHandle::CURLHandle(const string &token, const string &cert_path) {
 CURLHandle::~CURLHandle() {
 	curl_easy_cleanup(curl);
 }
-
-struct RequestInfo {
-	string url = "";
-	string body = "";
-	uint16_t response_code = 0;
-	std::vector<HTTPHeaders> header_collection;
-};
 
 static idx_t httpfs_client_count = 0;
 
