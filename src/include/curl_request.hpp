@@ -12,21 +12,21 @@
 namespace duckdb {
 
 struct RequestInfo {
-    std::string url;
-    std::string body;
-    uint16_t response_code = 0;
+	std::string url;
+	std::string body;
+	uint16_t response_code = 0;
 };
 
 struct CurlRequest {
-    unique_ptr<RequestInfo> info;
-    std::promise<unique_ptr<HTTPResponse>> done;
-    std::atomic<bool> completed{false};
-    CURL *easy = nullptr;
+	unique_ptr<RequestInfo> info;
+	std::promise<unique_ptr<HTTPResponse>> done;
+	std::atomic<bool> completed {false};
+	CURL *easy = nullptr;
 
-    explicit CurlRequest(std::string url);
-    ~CurlRequest();
+	explicit CurlRequest(std::string url);
+	~CurlRequest();
 
-    static size_t WriteBody(void *contents, size_t size, size_t nmemb, void *userp);
+	static size_t WriteBody(void *contents, size_t size, size_t nmemb, void *userp);
 };
 
 } // namespace duckdb
