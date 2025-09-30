@@ -7,8 +7,6 @@
 #include <sys/stat.h>
 #include "duckdb/common/exception/http_exception.hpp"
 
-#include <iostream>
-
 namespace duckdb {
 
 // we statically compile in libcurl, which means the cert file location of the build machine is the

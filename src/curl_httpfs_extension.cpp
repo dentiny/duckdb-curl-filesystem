@@ -104,6 +104,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	if (config.http_util && config.http_util->GetName() == "WasmHTTPUtils") {
 		// Already handled, do not override
 	} else {
+		// By default to use curl utils.
 		config.http_util = make_shared_ptr<HTTPFSCurlUtil>();
 	}
 
