@@ -1,242 +1,254 @@
 #include "multi_curl_manager.hpp"
 
 #include <array>
-#include <curl/curl.h>
-#include <fcntl.h>
+#include <cstring>
+#include <iostream>
 #include <sys/epoll.h>
-#include <sys/stat.h>
-#include <sys/time.h>
 #include <sys/timerfd.h>
-#include <sys/types.h>
 #include <unistd.h>
 
-#include "syscall_macros.hpp"
+#include "duckdb/common/unique_ptr.hpp"
+#include "duckdb/common/helper.hpp"
 
-#include <iostream>
+// ----------------------
+// CurlRequest impl
+// ----------------------
 
-#define CHECK_CURL_OK(expr)  D_ASSERT((expr) == CURLE_OK)
-#define CHECK_CURLM_OK(expr) D_ASSERT((expr) == CURLM_OK)
+CurlRequest::CurlRequest(std::string url) : info(make_uniq<RequestInfo>()) {
+    info->url = std::move(url);
+    easy = curl_easy_init();
+    if (!easy) throw std::runtime_error("curl_easy_init failed");
 
-namespace duckdb {
+    curl_easy_setopt(easy, CURLOPT_URL, info->url.c_str());
+    curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, CurlRequest::WriteBody);
+    curl_easy_setopt(easy, CURLOPT_WRITEDATA, this);
+    curl_easy_setopt(easy, CURLOPT_PRIVATE, this);
+    curl_easy_setopt(easy, CURLOPT_VERBOSE, 1L);
+}
+
+CurlRequest::~CurlRequest() {
+    if (easy) {
+        curl_easy_cleanup(easy);
+    }
+}
+
+/*static*/ size_t CurlRequest::WriteBody(void *contents, size_t size, size_t nmemb, void *userp) {
+    size_t total_size = size * nmemb;
+    auto *req = static_cast<CurlRequest *>(userp);
+    req->info->body.append(static_cast<char *>(contents), total_size);
+    return total_size;
+}
+
+// ----------------------
+// Internal SockInfo
+// ----------------------
 
 namespace {
 struct SockInfo {
-	curl_socket_t sockfd = 0;
-	CURL *easy = nullptr;
-	int action = 0;
-	long timeout = 0;
-	GlobalInfo *global = nullptr;
+    curl_socket_t sockfd = 0;
+    CURL *easy = nullptr;
+    int action = 0;
+    GlobalInfo *global = nullptr;
 };
-int MultiTimerCallback(CURLM *multi, long timeout_ms, struct GlobalInfo *global_info) {
-	struct itimerspec its;
-
-	if (timeout_ms > 0) {
-		its.it_interval.tv_sec = 0;
-		its.it_interval.tv_nsec = 0;
-		its.it_value.tv_sec = timeout_ms / 1000;
-		its.it_value.tv_nsec = (timeout_ms % 1000) * 1000 * 1000;
-	} else if (timeout_ms == 0) {
-		/* libcurl wants us to timeout now, however setting both fields of
-		 * new_value.it_value to zero disarms the timer. The closest we can
-		 * do is to schedule the timer to fire in 1 ns. */
-		its.it_interval.tv_sec = 0;
-		its.it_interval.tv_nsec = 0;
-		its.it_value.tv_sec = 0;
-		its.it_value.tv_nsec = 1;
-	} else {
-		memset(&its, 0, sizeof(its));
-	}
-
-	int ret = timerfd_settime(global_info->timer_fd, /*flags=*/0, &its, NULL);
-	SYSCALL_THROW_IF_ERROR(ret);
-
-	return 0;
-}
-
-// Retrieve completed IO operations and invoke callback.
-void CheckMultiWithNoLock(struct GlobalInfo *global_info) {
-	CURLMsg *msg = nullptr;
-	int msgs_left = 0;
-
-	while ((msg = curl_multi_info_read(global_info->multi, &msgs_left))) {
-		if (msg->msg == CURLMSG_DONE) {
-			CURL *easy = msg->easy_handle;
-			EasyRequest *request = nullptr;
-			curl_easy_getinfo(easy, CURLINFO_PRIVATE, &request);
-
-			// Set response code.
-			long response_code = 0;
-			curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &response_code);
-			request->info->response_code = static_cast<uint16_t>(response_code);
-
-			// Set http response.
-			HTTPStatusCode code = HTTPUtil::ToStatusCode(request->info->response_code);
-			auto resp = make_uniq<HTTPResponse>(std::move(code));
-			resp->body = request->info->body;
-
-			// Mark request completion.
-			request->done.set_value(std::move(resp));
-			request->completed.store(true);
-
-			curl_multi_remove_handle(global_info->multi, easy);
-			curl_easy_cleanup(easy);
-		}
-	}
-}
-
-void TimerCallback(struct GlobalInfo *global_info, int revents) {
-	std::lock_guard<std::mutex> lck(global_info->mu);
-	uint64_t count = 0;
-
-	int ret = read(global_info->timer_fd, &count, sizeof(uint64_t));
-	SYSCALL_THROW_IF_ERROR(ret);
-
-	CHECK_CURLM_OK(curl_multi_socket_action(global_info->multi, CURL_SOCKET_TIMEOUT, 0, &global_info->still_running));
-	CheckMultiWithNoLock(global_info);
-}
-
-void FdEventCallback(struct GlobalInfo *global_info, int fd, int revents) {
-	std::lock_guard<std::mutex> lck(global_info->mu);
-	int action = ((revents & EPOLLIN) ? CURL_CSELECT_IN : 0) | ((revents & EPOLLOUT) ? CURL_CSELECT_OUT : 0);
-	CHECK_CURLM_OK(curl_multi_socket_action(global_info->multi, fd, action, &global_info->still_running));
-	CheckMultiWithNoLock(global_info);
-	if (global_info->still_running <= 0) {
-		struct itimerspec its;
-		memset(&its, 0, sizeof(its));
-		int ret = timerfd_settime(global_info->timer_fd, 0, &its, NULL);
-		SYSCALL_THROW_IF_ERROR(ret);
-	}
-}
-
-void RemoveSockInfo(SockInfo *sock_info, GlobalInfo *global_info) {
-	if (sock_info == nullptr) {
-		return;
-	}
-	if (sock_info->sockfd == 0) {
-		return;
-	}
-	const int ret = epoll_ctl(global_info->epoll_fd, EPOLL_CTL_DEL, sock_info->sockfd, NULL);
-	SYSCALL_THROW_IF_ERROR(ret);
-	delete sock_info;
-}
-void SetSockInfo(SockInfo *sock_info, curl_socket_t s, CURL *e, int act, GlobalInfo *global_info) {
-	epoll_event ev;
-	int kind = ((act & CURL_POLL_IN) ? EPOLLIN : 0) | ((act & CURL_POLL_OUT) ? EPOLLOUT : 0);
-	if (sock_info->sockfd != 0) {
-		const int ret = epoll_ctl(global_info->epoll_fd, EPOLL_CTL_DEL, sock_info->sockfd, NULL);
-		SYSCALL_THROW_IF_ERROR(ret);
-	}
-
-	sock_info->sockfd = s;
-	sock_info->action = act;
-	sock_info->easy = e;
-
-	ev.events = kind;
-	ev.data.fd = s;
-	const int ret = epoll_ctl(global_info->epoll_fd, EPOLL_CTL_ADD, s, &ev);
-	SYSCALL_THROW_IF_ERROR(ret);
-}
-void AddSockInfo(curl_socket_t s, CURL *easy, int action, GlobalInfo *global_info) {
-	struct SockInfo *sock_info = new SockInfo {};
-	sock_info->global = global_info;
-	SetSockInfo(sock_info, s, easy, action, global_info);
-	curl_multi_assign(global_info->multi, s, sock_info);
-}
-int SocketCallback(CURL *e, curl_socket_t s, int what, void *cbp, void *sockp) {
-	auto *global_info = static_cast<GlobalInfo *>(cbp);
-	auto *sock_info = static_cast<SockInfo *>(sockp);
-
-	if (what == CURL_POLL_REMOVE) {
-		RemoveSockInfo(sock_info, global_info);
-		return 0;
-	}
-	if (sock_info == nullptr) {
-		AddSockInfo(s, e, what, global_info);
-	} else {
-		SetSockInfo(sock_info, s, e, what, global_info);
-	}
-	return 0;
-}
 } // namespace
 
-/*static*/ MultiCurlManager &MultiCurlManager::GetInstance() {
-	static auto *multi_curl_manager = new MultiCurlManager();
-	return *multi_curl_manager;
+// ----------------------
+// Callbacks
+// ----------------------
+
+static void CheckMulti(GlobalInfo *g) {
+    CURLMsg *msg = nullptr;
+    int msgs_left = 0;
+
+    while ((msg = curl_multi_info_read(g->multi, &msgs_left))) {
+        if (msg->msg == CURLMSG_DONE) {
+            CURL *easy = msg->easy_handle;
+            CurlRequest *req = nullptr;
+            curl_easy_getinfo(easy, CURLINFO_PRIVATE, &req);
+
+            long response_code = 0;
+            curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &response_code);
+            req->info->response_code = static_cast<uint16_t>(response_code);
+
+            auto resp = make_uniq<HTTPResponse>(req->info->response_code);
+            resp->body = req->info->body;
+
+            req->done.set_value(std::move(resp));
+            req->completed.store(true);
+
+            curl_multi_remove_handle(g->multi, easy);
+        }
+    }
 }
 
-MultiCurlManager::MultiCurlManager() {
-	// Initialize epoll and timer.
-	int epoll_fd = epoll_create1(EPOLL_CLOEXEC);
-	SYSCALL_THROW_IF_ERROR(epoll_fd);
+static void TimerCallback(GlobalInfo *g, int revents) {
+    uint64_t count = 0;
+    (void)revents;
+    (void)read(g->timer_fd, &count, sizeof(uint64_t));
 
-	int timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
-	SYSCALL_THROW_IF_ERROR(timer_fd);
+    curl_multi_socket_action(g->multi, CURL_SOCKET_TIMEOUT, 0, &g->still_running);
+    CheckMulti(g);
+}
 
-	struct itimerspec its;
-	memset(&its, 0, sizeof(its));
-	its.it_interval.tv_sec = 0;
-	its.it_value.tv_sec = 1;
-	int ret = timerfd_settime(timer_fd, 0, &its, NULL);
-	SYSCALL_THROW_IF_ERROR(ret);
+static void EventCallback(GlobalInfo *g, int fd, int revents) {
+    int action = ((revents & EPOLLIN) ? CURL_CSELECT_IN : 0) |
+                 ((revents & EPOLLOUT) ? CURL_CSELECT_OUT : 0);
 
-	struct epoll_event ev;
-	ev.events = EPOLLIN;
-	ev.data.fd = timer_fd;
-	ret = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, timer_fd, &ev);
-	SYSCALL_THROW_IF_ERROR(ret);
+    curl_multi_socket_action(g->multi, fd, action, &g->still_running);
+    CheckMulti(g);
 
-	// Initialize multi-curl and global info.
-	auto *multicurl = curl_multi_init();
-	global_info.epoll_fd = epoll_fd;
-	global_info.timer_fd = timer_fd;
-	global_info.multi = multicurl;
-	global_info.still_running = 0;
+    if (g->still_running <= 0) {
+        struct itimerspec its;
+        memset(&its, 0, sizeof(its));
+        timerfd_settime(g->timer_fd, 0, &its, NULL);
+    }
+}
 
-	CHECK_CURLM_OK(curl_multi_setopt(global_info.multi, CURLMOPT_SOCKETFUNCTION, SocketCallback));
-	CHECK_CURLM_OK(curl_multi_setopt(global_info.multi, CURLMOPT_SOCKETDATA, &global_info));
-	CHECK_CURLM_OK(curl_multi_setopt(global_info.multi, CURLMOPT_TIMERFUNCTION, MultiTimerCallback));
-	CHECK_CURLM_OK(curl_multi_setopt(global_info.multi, CURLMOPT_TIMERDATA, &global_info));
+static void RemoveSockInfo(SockInfo *f, GlobalInfo *g) {
+    if (f) {
+        if (f->sockfd) {
+            epoll_ctl(g->epoll_fd, EPOLL_CTL_DEL, f->sockfd, NULL);
+        }
+        delete f;
+    }
+}
 
-	// Start a background thread to handle epoll events.
-	bkg_thread = std::thread([this]() { HandleEvent(); });
+static void SetSockInfo(SockInfo *f, curl_socket_t s, CURL *e, int act, GlobalInfo *g) {
+    struct epoll_event ev;
+    int kind = ((act & CURL_POLL_IN) ? EPOLLIN : 0) |
+               ((act & CURL_POLL_OUT) ? EPOLLOUT : 0);
+
+    if (f->sockfd) {
+        epoll_ctl(g->epoll_fd, EPOLL_CTL_DEL, f->sockfd, NULL);
+    }
+
+    f->sockfd = s;
+    f->action = act;
+    f->easy = e;
+
+    ev.events = kind;
+    ev.data.fd = s;
+    epoll_ctl(g->epoll_fd, EPOLL_CTL_ADD, s, &ev);
+}
+
+static void AddSockInfo(curl_socket_t s, CURL *easy, int action, GlobalInfo *g) {
+    auto *fdp = new SockInfo();
+    fdp->global = g;
+    SetSockInfo(fdp, s, easy, action, g);
+    curl_multi_assign(g->multi, s, fdp);
+}
+
+static int SocketCallback(CURL *e, curl_socket_t s, int what, void *cbp, void *sockp) {
+    auto *g = static_cast<GlobalInfo *>(cbp);
+    auto *fdp = static_cast<SockInfo *>(sockp);
+
+    if (what == CURL_POLL_REMOVE) {
+        RemoveSockInfo(fdp, g);
+    } else {
+        if (!fdp) {
+            AddSockInfo(s, e, what, g);
+        } else {
+            SetSockInfo(fdp, s, e, what, g);
+        }
+    }
+    return 0;
+}
+
+static int MultiTimerCallback(CURLM *multi, long timeout_ms, GlobalInfo *g) {
+    struct itimerspec its;
+    if (timeout_ms > 0) {
+        its.it_interval.tv_sec = 0;
+        its.it_interval.tv_nsec = 0;
+        its.it_value.tv_sec = timeout_ms / 1000;
+        its.it_value.tv_nsec = (timeout_ms % 1000) * 1000 * 1000;
+    } else if (timeout_ms == 0) {
+        its.it_interval.tv_sec = 0;
+        its.it_interval.tv_nsec = 0;
+        its.it_value.tv_sec = 0;
+        its.it_value.tv_nsec = 1;
+    } else {
+        memset(&its, 0, sizeof(its));
+    }
+    timerfd_settime(g->timer_fd, 0, &its, NULL);
+    return 0;
+}
+
+// ----------------------
+// MultiCurlManager impl
+// ----------------------
+
+/*static*/ MultiCurlManager &MultiCurlManager::GetInstance() {
+    static auto *manager = new MultiCurlManager();
+    return *manager;
+}
+
+MultiCurlManager::MultiCurlManager() : global_info(make_uniq<GlobalInfo>()) {
+    int epfd = epoll_create1(EPOLL_CLOEXEC);
+    if (epfd == -1) throw std::runtime_error("epoll_create1 failed");
+
+    int tfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    if (tfd == -1) throw std::runtime_error("timerfd_create failed");
+
+    struct itimerspec its;
+    memset(&its, 0, sizeof(its));
+    its.it_value.tv_sec = 1;
+    timerfd_settime(tfd, 0, &its, NULL);
+
+    struct epoll_event ev;
+    ev.events = EPOLLIN;
+    ev.data.fd = tfd;
+    epoll_ctl(epfd, EPOLL_CTL_ADD, tfd, &ev);
+
+    global_info->epoll_fd = epfd;
+    global_info->timer_fd = tfd;
+    global_info->multi = curl_multi_init();
+
+    curl_multi_setopt(global_info->multi, CURLMOPT_SOCKETFUNCTION, SocketCallback);
+    curl_multi_setopt(global_info->multi, CURLMOPT_SOCKETDATA, global_info.get());
+    curl_multi_setopt(global_info->multi, CURLMOPT_TIMERFUNCTION, MultiTimerCallback);
+    curl_multi_setopt(global_info->multi, CURLMOPT_TIMERDATA, global_info.get());
+
+    bkg_thread = std::thread([this]() { HandleEvent(); });
 }
 
 void MultiCurlManager::HandleEvent() {
-	std::array<epoll_event, 32> events {};
-
-	// Run the event loop continuously
-	while (true) {
-		// TODO(hjiang): Should block indefinitely.
-		const int count =
-		    epoll_wait(global_info.epoll_fd, events.data(), sizeof(events) / sizeof(epoll_event), /*timeout=*/10000);
-		SYSCALL_EXIT_IF_ERROR(count);
-
-		if (count == 0) {
-			// If no events, check multi info in case transfers completed
-			std::lock_guard<std::mutex> lck(global_info.mu);
-			CheckMultiWithNoLock(&global_info);
-			continue;
-		}
-
-		for (int idx = 0; idx < count; ++idx) {
-			if (events[idx].data.fd == global_info.timer_fd) {
-				TimerCallback(&global_info, events[idx].events);
-			} else {
-				FdEventCallback(&global_info, events[idx].data.fd, events[idx].events);
-			}
-		}
-	}
+    std::array<epoll_event, 32> events{};
+    while (true) {
+        int nfds = epoll_wait(global_info->epoll_fd, events.data(), events.size(), 1000);
+        if (nfds < 0) {
+            if (errno == EINTR) continue;
+            perror("epoll_wait");
+            break;
+        }
+        for (int i = 0; i < nfds; i++) {
+            if (events[i].data.fd == global_info->timer_fd) {
+                TimerCallback(global_info.get(), events[i].events);
+            } else {
+                EventCallback(global_info.get(), events[i].data.fd, events[i].events);
+            }
+        }
+        ProcessPendingRequests();
+    }
 }
 
-unique_ptr<HTTPResponse> MultiCurlManager::HandleRequest(unique_ptr<EasyRequest> request) {
-	auto fut = request->done.get_future();
+void MultiCurlManager::ProcessPendingRequests() {
+    while (!pending_requests_.empty()) {
+        auto req = std::move(pending_requests_.front());
+        pending_requests_.pop();
 
-	{
-		std::lock_guard<std::mutex> lck(global_info.mu);
-		CHECK_CURLM_OK(curl_multi_add_handle(global_info.multi, request->easy));
-	}
+        CURL *easy = req->easy;
+        ongoing_requests_[easy] = std::move(req);
 
-	return fut.get();
+        curl_easy_setopt(easy, CURLOPT_PRIVATE, ongoing_requests_[easy].get());
+        curl_multi_add_handle(global_info->multi, easy);
+    }
 }
 
-} // namespace duckdb
+std::unique_ptr<HTTPResponse> MultiCurlManager::HandleRequest(std::unique_ptr<CurlRequest> request) {
+    auto fut = request->done.get_future();
+    {
+        std::lock_guard<std::mutex> lck(global_info->mu);
+        pending_requests_.push(std::move(request));
+    }
+    return fut.get();
+}

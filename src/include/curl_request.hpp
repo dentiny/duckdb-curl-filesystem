@@ -18,7 +18,7 @@ struct RequestInfo {
 	std::vector<HTTPHeaders> header_collection;
 };
 
-struct EasyRequest {
+struct CurlRequest {
 	unique_ptr<RequestInfo> info;
 	std::promise<unique_ptr<HTTPResponse>> done;
 	std::atomic<bool> completed {false};
@@ -27,12 +27,11 @@ struct EasyRequest {
 	optional_ptr<HTTPState> state = nullptr;
 	GetRequestInfo *get_info = nullptr;
 
-	EasyRequest(string url);
-	~EasyRequest();
+	CurlRequest(string url);
+	~CurlRequest();
 
 	static int ProgressCallback(void *p, double dltotal, double dlnow, double ult, double uln);
 	static size_t WriteBody(void *contents, size_t size, size_t nmemb, void *userp);
-	static size_t WriteHeader(void *contents, size_t size, size_t nmemb, void *userp);
 };
 
 } // namespace duckdb

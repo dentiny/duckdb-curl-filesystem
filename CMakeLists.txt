@@ -19,7 +19,7 @@ include_directories(duckdb/third_party/httplib)
 set(EXTENSION_SOURCES 
     src/create_secret_functions.cpp
     src/crypto.cpp
-    src/curl_request.cpp
+    # src/curl_request.cpp
     src/hash_functions.cpp
     src/hffs.cpp
     src/http_state.cpp
