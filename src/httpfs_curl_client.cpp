@@ -120,6 +120,9 @@ public:
 		curl = make_uniq<CURLHandle>(bearer_token, SelectCURLCertPath());
 		request_info = make_uniq<RequestInfo>();
 
+		// Use HTTP/2 for better performance.
+		curl_easy_setopt(*curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
+
 		// set curl options
 		// follow redirects
 		curl_easy_setopt(*curl, CURLOPT_FOLLOWLOCATION, 1L);
