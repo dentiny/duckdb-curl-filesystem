@@ -4,6 +4,7 @@
 #include "duckdb/common/unique_ptr.hpp"
 #include "multi_curl_manager.hpp"
 #include "duckdb/common/helper.hpp"
+#include "duckdb/common/http_util.hpp"
 
 using namespace duckdb;
 
@@ -17,7 +18,7 @@ int main() {
     auto &mgr = MultiCurlManager::GetInstance();
     auto resp = mgr.HandleRequest(std::move(req));
 
-    std::cout << "Response (" << resp->status_code << "):\n"
+    std::cout << "Response (" << HTTPUtil::GetStatusMessage(resp->status) << "):\n"
               << resp->body << "...\n";
 
     return 0;

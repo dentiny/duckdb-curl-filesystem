@@ -11,35 +11,6 @@
 #include "duckdb/common/helper.hpp"
 
 // ----------------------
-// CurlRequest impl
-// ----------------------
-
-CurlRequest::CurlRequest(std::string url) : info(make_uniq<RequestInfo>()) {
-    info->url = std::move(url);
-    easy = curl_easy_init();
-    if (!easy) throw std::runtime_error("curl_easy_init failed");
-
-    curl_easy_setopt(easy, CURLOPT_URL, info->url.c_str());
-    curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, CurlRequest::WriteBody);
-    curl_easy_setopt(easy, CURLOPT_WRITEDATA, this);
-    curl_easy_setopt(easy, CURLOPT_PRIVATE, this);
-    curl_easy_setopt(easy, CURLOPT_VERBOSE, 1L);
-}
-
-CurlRequest::~CurlRequest() {
-    if (easy) {
-        curl_easy_cleanup(easy);
-    }
-}
-
-/*static*/ size_t CurlRequest::WriteBody(void *contents, size_t size, size_t nmemb, void *userp) {
-    size_t total_size = size * nmemb;
-    auto *req = static_cast<CurlRequest *>(userp);
-    req->info->body.append(static_cast<char *>(contents), total_size);
-    return total_size;
-}
-
-// ----------------------
 // Internal SockInfo
 // ----------------------
 
@@ -70,8 +41,10 @@ static void CheckMulti(GlobalInfo *g) {
             curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &response_code);
             req->info->response_code = static_cast<uint16_t>(response_code);
 
-            auto resp = make_uniq<HTTPResponse>(req->info->response_code);
+			HTTPStatusCode status_code = HTTPUtil::ToStatusCode(req->info->response_code);
+            auto resp = make_uniq<HTTPResponse>(status_code);
             resp->body = req->info->body;
+			resp->url = req->info->url;
 
             req->done.set_value(std::move(resp));
             req->completed.store(true);
@@ -244,11 +217,11 @@ void MultiCurlManager::ProcessPendingRequests() {
     }
 }
 
-std::unique_ptr<HTTPResponse> MultiCurlManager::HandleRequest(std::unique_ptr<CurlRequest> request) {
+unique_ptr<HTTPResponse> MultiCurlManager::HandleRequest(unique_ptr<CurlRequest> request) {
     auto fut = request->done.get_future();
     {
         std::lock_guard<std::mutex> lck(global_info->mu);
-        pending_requests_.push(std::move(request));
+        pending_requests_.emplace(std::move(request));
     }
     return fut.get();
 }
