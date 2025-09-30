@@ -13,7 +13,9 @@ int main() {
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
     string url = "https://raw.githubusercontent.com/dentiny/duck-read-cache-fs/main/test/data/stock-exchanges.csv";
-    auto req = make_uniq<CurlRequest>(std::move(url));
+    CURL* easy_curl = curl_easy_init();
+    auto req = make_uniq<CurlRequest>(easy_curl);
+    req->SetUrl(std::move(url));
 
     auto &mgr = MultiCurlManager::GetInstance();
     auto resp = mgr.HandleRequest(std::move(req));
