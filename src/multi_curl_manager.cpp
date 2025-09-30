@@ -10,8 +10,6 @@
 #include "duckdb/common/unique_ptr.hpp"
 #include "syscall_macros.hpp"
 
-#include <iostream>
-
 namespace duckdb {
 
 namespace {
