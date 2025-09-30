@@ -1,19 +1,20 @@
 #pragma once
 
-#include <atomic>
+#include <cstdint>
 #include <future>
 
-#include "duckdb/common/unique_ptr.hpp"
-#include "duckdb/common/map.hpp"
 #include "duckdb/common/http_util.hpp"
+#include "duckdb/common/map.hpp"
+#include "duckdb/common/string.hpp"
+#include "duckdb/common/unique_ptr.hpp"
 #include "httpfs_client.hpp"
 #include "http_state.hpp"
 
 namespace duckdb {
 
 struct RequestInfo {
-	std::string url;
-	std::string body;
+	string url;
+	string body;
 	uint16_t response_code = 0;
 };
 

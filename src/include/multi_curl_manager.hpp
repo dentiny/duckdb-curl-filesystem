@@ -19,6 +19,8 @@ struct GlobalInfo {
 	int timer_fd = -1;
 	CURLM *multi = nullptr;
 	int still_running = 0;
+	// Only accessed in the background thread.
+	unordered_map<CURL *, unique_ptr<CurlRequest>> ongoing_requests;
 };
 
 class MultiCurlManager {
@@ -45,7 +47,6 @@ private:
 	// Used to protect [`pending_requests`].
 	std::mutex mu;
 	queue<unique_ptr<CurlRequest>> pending_requests;
-	unordered_map<CURL *, unique_ptr<CurlRequest>> ongoing_requests;
 	// Background thread which keeps polling with polling engine.
 	std::thread bkg_thread;
 };

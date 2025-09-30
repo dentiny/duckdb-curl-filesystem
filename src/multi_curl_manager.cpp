@@ -43,6 +43,9 @@ void CheckMulti(GlobalInfo *g) {
 		req->done.set_value(std::move(resp));
 
 		curl_multi_remove_handle(g->multi, easy);
+		auto iter = g->ongoing_requests.find(easy);
+		D_ASSERT(iter != g->ongoing_requests.end());
+		g->ongoing_requests.erase(iter);
 	}
 }
 
@@ -74,7 +77,7 @@ void RemoveSockInfo(SockInfo *f, GlobalInfo *g) {
 	if (f == nullptr) {
 		return;
 	}
-	if (f->sockfd) {
+	if (f->sockfd != 0) {
 		const int ret = epoll_ctl(g->epoll_fd, EPOLL_CTL_DEL, f->sockfd, NULL);
 		SYSCALL_THROW_IF_ERROR(ret);
 	}
@@ -214,9 +217,9 @@ void MultiCurlManager::ProcessPendingRequests() {
 
 		auto *curl_request_ptr = curl_request.get();
 		CURL *easy_curl = curl_request->easy_curl;
-		auto iter = ongoing_requests.find(easy_curl);
-		D_ASSERT(iter == ongoing_requests.end());
-		ongoing_requests[easy_curl] = std::move(curl_request);
+		auto iter = global_info->ongoing_requests.find(easy_curl);
+		D_ASSERT(iter == global_info->ongoing_requests.end());
+		global_info->ongoing_requests[easy_curl] = std::move(curl_request);
 
 		curl_easy_setopt(easy_curl, CURLOPT_PRIVATE, curl_request_ptr);
 		curl_multi_add_handle(global_info->multi, easy_curl);
