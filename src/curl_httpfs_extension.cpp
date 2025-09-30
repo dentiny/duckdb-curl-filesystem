@@ -1,4 +1,4 @@
-#include "httpfs_extension.hpp"
+#include "curl_httpfs_extension.hpp"
 
 #include "httpfs_client.hpp"
 #include "create_secret_functions.hpp"
@@ -10,25 +10,6 @@
 #endif // OVERRIDE_ENCRYPTION_UTILS
 
 namespace duckdb {
-
-static void SetHttpfsClientImplementation(DBConfig &config, const string &value) {
-	if (config.http_util && config.http_util->GetName() == "WasmHTTPUtils") {
-		if (value == "wasm" || value == "default") {
-			// Already handled, do not override
-			return;
-		}
-		throw InvalidInputException("Unsupported option for httpfs_client_implementation, only `wasm` and "
-		                            "`default` are currently supported for duckdb-wasm");
-	}
-	if (value == "httplib" || value == "default") {
-		if (!config.http_util || config.http_util->GetName() != "HTTPFSUtil") {
-			config.http_util = make_shared_ptr<HTTPFSUtil>();
-		}
-		return;
-	}
-	throw InvalidInputException("Unsupported option for httpfs_client_implementation, only `curl`, `httplib` and "
-	                            "`default` are currently supported");
-}
 
 static void LoadInternal(ExtensionLoader &loader) {
 	auto &instance = loader.GetDatabaseInstance();
@@ -137,14 +118,14 @@ static void LoadInternal(ExtensionLoader &loader) {
 	config.encryption_util = make_shared_ptr<AESStateSSLFactory>();
 #endif // OVERRIDE_ENCRYPTION_UTILS
 }
-void HttpfsExtension::Load(ExtensionLoader &loader) {
+void CurlHttpfsExtension::Load(ExtensionLoader &loader) {
 	LoadInternal(loader);
 }
-std::string HttpfsExtension::Name() {
-	return "httpfs";
+std::string CurlHttpfsExtension::Name() {
+	return "curl_httpfs";
 }
 
-std::string HttpfsExtension::Version() const {
+std::string CurlHttpfsExtension::Version() const {
 #ifdef EXT_VERSION_HTTPFS
 	return EXT_VERSION_HTTPFS;
 #else
@@ -156,7 +137,7 @@ std::string HttpfsExtension::Version() const {
 
 extern "C" {
 
-DUCKDB_CPP_EXTENSION_ENTRY(httpfs, loader) {
+DUCKDB_CPP_EXTENSION_ENTRY(curl_httpfs, loader) {
 	duckdb::LoadInternal(loader);
 }
 }

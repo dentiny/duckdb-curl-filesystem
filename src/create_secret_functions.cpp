@@ -226,7 +226,7 @@ void CreateS3SecretFunctions::RegisterCreateSecretFunction(ExtensionLoader &load
 	secret_type.name = type;
 	secret_type.deserializer = KeyValueSecret::Deserialize<KeyValueSecret>;
 	secret_type.default_provider = "config";
-	secret_type.extension = "httpfs";
+	secret_type.extension = "curl_httpfs";
 
 	loader.RegisterSecretType(secret_type);
 
@@ -241,7 +241,7 @@ void CreateBearerTokenFunctions::Register(ExtensionLoader &loader) {
 	secret_type_hf.name = HUGGINGFACE_TYPE;
 	secret_type_hf.deserializer = KeyValueSecret::Deserialize<KeyValueSecret>;
 	secret_type_hf.default_provider = "config";
-	secret_type_hf.extension = "httpfs";
+	secret_type_hf.extension = "curl_httpfs";
 	loader.RegisterSecretType(secret_type_hf);
 
 	// Huggingface config provider
@@ -264,7 +264,7 @@ unique_ptr<BaseSecret> CreateBearerTokenFunctions::CreateSecretFunctionInternal(
 		if (input.type == HUGGINGFACE_TYPE) {
 			scope.push_back("hf://");
 		} else {
-			throw InternalException("Unknown secret type found in httpfs extension: '%s'", input.type);
+			throw InternalException("Unknown secret type found in curl_httpfs extension: '%s'", input.type);
 		}
 	}
 	auto return_value = make_uniq<KeyValueSecret>(scope, input.type, input.provider, input.name);
