@@ -40,9 +40,7 @@ void CheckMulti(GlobalInfo *g) {
 		auto resp = make_uniq<HTTPResponse>(status_code);
 		resp->body = req->info->body;
 		resp->url = req->info->url;
-
 		req->done.set_value(std::move(resp));
-		req->completed.store(true);
 
 		curl_multi_remove_handle(g->multi, easy);
 	}
@@ -50,8 +48,9 @@ void CheckMulti(GlobalInfo *g) {
 
 void TimerCallback(GlobalInfo *g, int revents) {
 	uint64_t count = 0;
-	(void)revents;
-	(void)read(g->timer_fd, &count, sizeof(uint64_t));
+	// Epoll leverages reactor model, need to read active bytes out.
+	const int bytes_read = read(g->timer_fd, &count, sizeof(uint64_t));
+	D_ASSERT(bytes_read == sizeof(uint64_t));
 
 	curl_multi_socket_action(g->multi, CURL_SOCKET_TIMEOUT, 0, &g->still_running);
 	CheckMulti(g);
@@ -66,17 +65,20 @@ void EventCallback(GlobalInfo *g, int fd, int revents) {
 	if (g->still_running <= 0) {
 		struct itimerspec its;
 		memset(&its, 0, sizeof(its));
-		timerfd_settime(g->timer_fd, 0, &its, NULL);
+		const int ret = timerfd_settime(g->timer_fd, 0, &its, NULL);
+		SYSCALL_THROW_IF_ERROR(ret);
 	}
 }
 
 void RemoveSockInfo(SockInfo *f, GlobalInfo *g) {
-	if (f) {
-		if (f->sockfd) {
-			epoll_ctl(g->epoll_fd, EPOLL_CTL_DEL, f->sockfd, NULL);
-		}
-		delete f;
+	if (f == nullptr) {
+		return;
 	}
+	if (f->sockfd) {
+		const int ret = epoll_ctl(g->epoll_fd, EPOLL_CTL_DEL, f->sockfd, NULL);
+		SYSCALL_THROW_IF_ERROR(ret);
+	}
+	delete f;
 }
 
 void SetSockInfo(SockInfo *f, curl_socket_t s, CURL *e, int act, GlobalInfo *g) {
@@ -84,7 +86,8 @@ void SetSockInfo(SockInfo *f, curl_socket_t s, CURL *e, int act, GlobalInfo *g) 
 	int kind = ((act & CURL_POLL_IN) ? EPOLLIN : 0) | ((act & CURL_POLL_OUT) ? EPOLLOUT : 0);
 
 	if (f->sockfd) {
-		epoll_ctl(g->epoll_fd, EPOLL_CTL_DEL, f->sockfd, NULL);
+		const int ret = epoll_ctl(g->epoll_fd, EPOLL_CTL_DEL, f->sockfd, NULL);
+		SYSCALL_THROW_IF_ERROR(ret);
 	}
 
 	f->sockfd = s;
@@ -109,13 +112,14 @@ int SocketCallback(CURL *e, curl_socket_t s, int what, void *cbp, void *sockp) {
 
 	if (what == CURL_POLL_REMOVE) {
 		RemoveSockInfo(fdp, g);
-	} else {
-		if (!fdp) {
-			AddSockInfo(s, e, what, g);
-		} else {
-			SetSockInfo(fdp, s, e, what, g);
-		}
+		return 0;
 	}
+	if (fdp == nullptr) {
+		AddSockInfo(s, e, what, g);
+		return 0;
+	}
+
+	SetSockInfo(fdp, s, e, what, g);
 	return 0;
 }
 
@@ -134,7 +138,8 @@ int MultiTimerCallback(CURLM *multi, long timeout_ms, GlobalInfo *g) {
 	} else {
 		memset(&its, 0, sizeof(its));
 	}
-	timerfd_settime(g->timer_fd, 0, &its, NULL);
+	const int ret = timerfd_settime(g->timer_fd, 0, &its, NULL);
+	SYSCALL_THROW_IF_ERROR(ret);
 	return 0;
 }
 
@@ -146,24 +151,25 @@ int MultiTimerCallback(CURLM *multi, long timeout_ms, GlobalInfo *g) {
 }
 
 MultiCurlManager::MultiCurlManager() : global_info(make_uniq<GlobalInfo>()) {
-	int epfd = epoll_create1(EPOLL_CLOEXEC);
-	SYSCALL_EXIT_IF_ERROR(epfd);
+	int epoll_fd = epoll_create1(EPOLL_CLOEXEC);
+	SYSCALL_EXIT_IF_ERROR(epoll_fd);
 
-	int tfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
-	SYSCALL_EXIT_IF_ERROR(tfd);
+	int timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+	SYSCALL_EXIT_IF_ERROR(timer_fd);
 
 	struct itimerspec its;
 	memset(&its, 0, sizeof(its));
 	its.it_value.tv_sec = 1;
-	timerfd_settime(tfd, 0, &its, NULL);
+	timerfd_settime(timer_fd, 0, &its, NULL);
 
 	struct epoll_event ev;
 	ev.events = EPOLLIN;
-	ev.data.fd = tfd;
-	epoll_ctl(epfd, EPOLL_CTL_ADD, tfd, &ev);
+	ev.data.fd = timer_fd;
+	int ret = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, timer_fd, &ev);
+	SYSCALL_EXIT_IF_ERROR(ret);
 
-	global_info->epoll_fd = epfd;
-	global_info->timer_fd = tfd;
+	global_info->epoll_fd = epoll_fd;
+	global_info->timer_fd = timer_fd;
 	global_info->multi = curl_multi_init();
 
 	curl_multi_setopt(global_info->multi, CURLMOPT_SOCKETFUNCTION, SocketCallback);
@@ -177,18 +183,18 @@ MultiCurlManager::MultiCurlManager() : global_info(make_uniq<GlobalInfo>()) {
 void MultiCurlManager::HandleEvent() {
 	std::array<epoll_event, 32> events {};
 	while (true) {
-		int nfds = epoll_wait(global_info->epoll_fd, events.data(), events.size(), 1000);
+		const int nfds = epoll_wait(global_info->epoll_fd, events.data(), events.size(), /*timeout=*/-1);
 		if (nfds < 0) {
 			if (errno == EINTR) {
 				continue;
 			}
 			SYSCALL_THROW_IF_ERROR(nfds);
 		}
-		for (int i = 0; i < nfds; i++) {
-			if (events[i].data.fd == global_info->timer_fd) {
-				TimerCallback(global_info.get(), events[i].events);
+		for (int idx = 0; idx < nfds; ++idx) {
+			if (events[idx].data.fd == global_info->timer_fd) {
+				TimerCallback(global_info.get(), events[idx].events);
 			} else {
-				EventCallback(global_info.get(), events[i].data.fd, events[i].events);
+				EventCallback(global_info.get(), events[idx].data.fd, events[idx].events);
 			}
 		}
 		ProcessPendingRequests();
@@ -196,17 +202,23 @@ void MultiCurlManager::HandleEvent() {
 }
 
 void MultiCurlManager::ProcessPendingRequests() {
-	while (!pending_requests.empty()) {
-		auto req = std::move(pending_requests.front());
-		pending_requests.pop();
-		auto *req_ptr = req.get();
+	while (true) {
+		unique_ptr<CurlRequest> curl_request;
+		{
+			if (pending_requests.empty()) {
+				return;
+			}
+			curl_request = std::move(pending_requests.front());
+			pending_requests.pop();
+		}
 
-		CURL *easy_curl = req->easy_curl;
+		auto *curl_request_ptr = curl_request.get();
+		CURL *easy_curl = curl_request->easy_curl;
 		auto iter = ongoing_requests.find(easy_curl);
 		D_ASSERT(iter == ongoing_requests.end());
-		ongoing_requests[easy_curl] = std::move(req);
+		ongoing_requests[easy_curl] = std::move(curl_request);
 
-		curl_easy_setopt(easy_curl, CURLOPT_PRIVATE, req_ptr);
+		curl_easy_setopt(easy_curl, CURLOPT_PRIVATE, curl_request_ptr);
 		curl_multi_add_handle(global_info->multi, easy_curl);
 	}
 }
@@ -214,7 +226,7 @@ void MultiCurlManager::ProcessPendingRequests() {
 unique_ptr<HTTPResponse> MultiCurlManager::HandleRequest(unique_ptr<CurlRequest> request) {
 	auto fut = request->done.get_future();
 	{
-		std::lock_guard<std::mutex> lck(global_info->mu);
+		std::lock_guard<std::mutex> lck(mu);
 		pending_requests.emplace(std::move(request));
 	}
 	return fut.get();

@@ -18,7 +18,6 @@ struct GlobalInfo {
 	int epoll_fd = -1;
 	int timer_fd = -1;
 	CURLM *multi = nullptr;
-	std::mutex mu;
 	int still_running = 0;
 };
 
@@ -43,6 +42,8 @@ private:
 	void ProcessPendingRequests();
 
 	unique_ptr<GlobalInfo> global_info;
+	// Used to protect [`pending_requests`].
+	std::mutex mu;
 	queue<unique_ptr<CurlRequest>> pending_requests;
 	unordered_map<CURL *, unique_ptr<CurlRequest>> ongoing_requests;
 	// Background thread which keeps polling with polling engine.

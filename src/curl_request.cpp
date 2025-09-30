@@ -1,5 +1,7 @@
 #include "curl_request.hpp"
 
+#include "duckdb/common/assert.hpp"
+
 namespace duckdb {
 
 CurlRequest::CurlRequest(std::string url) : info(make_uniq<RequestInfo>()) {
