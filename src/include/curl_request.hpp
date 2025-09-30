@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <future>
+#include <vector>
 
 #include "duckdb/common/http_util.hpp"
 #include "duckdb/common/map.hpp"
@@ -13,9 +14,10 @@
 namespace duckdb {
 
 struct RequestInfo {
-	string url;
-	string body;
+	string url = "";
+	string body = "";
 	uint16_t response_code = 0;
+	std::vector<HTTPHeaders> header_collection;
 };
 
 struct CurlRequest {
@@ -26,6 +28,7 @@ struct CurlRequest {
 	explicit CurlRequest(std::string url);
 	~CurlRequest();
 
+	static size_t WriteHeader(void *contents, size_t size, size_t nmemb, void *userp);
 	static size_t WriteBody(void *contents, size_t size, size_t nmemb, void *userp);
 };
 
