@@ -19,6 +19,7 @@ include_directories(duckdb/third_party/httplib)
 set(EXTENSION_SOURCES 
     src/create_secret_functions.cpp
     src/crypto.cpp
+    src/curl_request.cpp
     src/hash_functions.cpp
     src/hffs.cpp
     src/http_state.cpp
@@ -42,3 +43,9 @@ install(
   EXPORT "${DUCKDB_EXPORT_SET}"
   LIBRARY DESTINATION "${INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${INSTALL_LIB_DIR}")
+
+# Test cases.
+include_directories(duckdb/third_party/catch)
+
+add_executable(multi_curl_manager_test integration/multi_curl_manager_test.cpp)
+target_link_libraries(multi_curl_manager_test ${EXTENSION_NAME})
