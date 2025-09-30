@@ -17,7 +17,7 @@ jobs:
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@main
     with:
       duckdb_version: v1.4.0
-      extension_name: quack
+      extension_name: curl_httpfs
       ci_tools_version: main
 
   duckdb-stable-build:
@@ -27,7 +27,7 @@ jobs:
     with:
       duckdb_version: v1.4.0
       ci_tools_version: v1.4.0
-      extension_name: quack
+      extension_name: curl_httpfs
 
   code-quality-check:
     name: Code Quality Check
@@ -35,5 +35,5 @@ jobs:
     with:
       duckdb_version: main # TODO: revert to latest stable probably
       ci_tools_version: main
-      extension_name: quack
+      extension_name: curl_httpfs
       format_checks: 'format;tidy'
