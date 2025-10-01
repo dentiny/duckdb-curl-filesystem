@@ -3,6 +3,7 @@
 #include <array>
 #include <cstring>
 #include <sys/epoll.h>
+#include <sys/eventfd.h>
 #include <sys/timerfd.h>
 #include <unistd.h>
 
@@ -161,6 +162,7 @@ MultiCurlManager::MultiCurlManager() : global_info(make_uniq<GlobalInfo>()) {
 	int epoll_fd = epoll_create1(EPOLL_CLOEXEC);
 	SYSCALL_EXIT_IF_ERROR(epoll_fd);
 
+	// Create timerfd and add to epoll.
 	int timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
 	SYSCALL_EXIT_IF_ERROR(timer_fd);
 
@@ -175,10 +177,22 @@ MultiCurlManager::MultiCurlManager() : global_info(make_uniq<GlobalInfo>()) {
 	int ret = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, timer_fd, &ev);
 	SYSCALL_EXIT_IF_ERROR(ret);
 
+	// Create eventfd and add to epoll.
+	int event_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+	SYSCALL_EXIT_IF_ERROR(event_fd);
+
+	ev.events = EPOLLIN;
+	ev.data.fd = event_fd;
+	ret = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, event_fd, &ev);
+	SYSCALL_EXIT_IF_ERROR(ret);
+
+	// Assign global info.
 	global_info->epoll_fd = epoll_fd;
 	global_info->timer_fd = timer_fd;
-	global_info->multi = curl_multi_init();
+	global_info->event_fd = event_fd;
 
+	// Create and initialize multi-curl.
+	global_info->multi = curl_multi_init();
 	curl_multi_setopt(global_info->multi, CURLMOPT_MAX_HOST_CONNECTIONS, DEFAULT_MAX_CONN_PER_HOST);
 	curl_multi_setopt(global_info->multi, CURLMOPT_SOCKETFUNCTION, SocketCallback);
 	curl_multi_setopt(global_info->multi, CURLMOPT_SOCKETDATA, global_info.get());
@@ -191,8 +205,7 @@ MultiCurlManager::MultiCurlManager() : global_info(make_uniq<GlobalInfo>()) {
 void MultiCurlManager::HandleEvent() {
 	std::array<epoll_event, 32> events {};
 	while (true) {
-		// TODO(hjiang): Use wakefd for notification, instead of epoll timeout.
-		const int nfds = epoll_wait(global_info->epoll_fd, events.data(), events.size(), /*timeout=*/1000);
+		const int nfds = epoll_wait(global_info->epoll_fd, events.data(), events.size(), /*timeout=*/-1);
 		if (nfds < 0) {
 			if (errno == EINTR) {
 				continue;
@@ -202,11 +215,15 @@ void MultiCurlManager::HandleEvent() {
 		for (int idx = 0; idx < nfds; ++idx) {
 			if (events[idx].data.fd == global_info->timer_fd) {
 				TimerCallback(global_info.get(), events[idx].events);
+			} else if (events[idx].data.fd == global_info->event_fd) {
+				uint64_t unused = 0;
+				const int ret = read(global_info->event_fd, &unused, sizeof(unused));
+				D_ASSERT(ret == sizeof(unused));
+				ProcessPendingRequests();
 			} else {
 				EventCallback(global_info.get(), events[idx].data.fd, events[idx].events);
 			}
 		}
-		ProcessPendingRequests();
 	}
 }
 
@@ -238,6 +255,12 @@ unique_ptr<HTTPResponse> MultiCurlManager::HandleRequest(unique_ptr<CurlRequest>
 		std::lock_guard<std::mutex> lck(mu);
 		pending_requests.emplace(std::move(request));
 	}
+
+	// Notify epoll to wakeup and process request.
+	uint64_t one = 1;
+	const ssize_t ret = write(global_info->event_fd, &one, sizeof(one));
+	D_ASSERT(ret == sizeof(one));
+
 	return resp_fut.get();
 }
 
