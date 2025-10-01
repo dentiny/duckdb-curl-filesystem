@@ -91,7 +91,7 @@ static size_t RequestHeaderCallback(void *contents, size_t size, size_t nmemb, v
 	return total_size;
 }
 
-}  // namespace
+} // namespace
 
 CURLHandle::CURLHandle(const string &token, const string &cert_path) {
 	curl = curl_easy_init();
