@@ -17,6 +17,7 @@ namespace duckdb {
 struct GlobalInfo {
 	int epoll_fd = -1;
 	int timer_fd = -1;
+	int event_fd = -1;
 	CURLM *multi = nullptr;
 	int still_running = 0;
 	// Only accessed in the background thread.
