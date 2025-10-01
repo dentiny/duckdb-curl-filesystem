@@ -3,6 +3,7 @@
 
 #define CPPHTTPLIB_OPENSSL_SUPPORT
 
+#include <atomic>
 #include <curl/curl.h>
 #include <sys/stat.h>
 
@@ -11,6 +12,11 @@
 #include "multi_curl_manager.hpp"
 
 namespace duckdb {
+
+namespace {
+
+// Number of global httfs clients.
+std::atomic<idx_t> httpfs_client_count {0};
 
 // we statically compile in libcurl, which means the cert file location of the build machine is the
 // place curl will look. But not every distro has this file in the same location, so we search a
@@ -42,15 +48,15 @@ static std::string cert_path = SelectCURLCertPath();
 
 // TODO(hjiang): Move content and header write callback to [`CurlRequest`].
 static size_t RequestWriteCallback(void *contents, size_t size, size_t nmemb, void *userp) {
-	size_t totalSize = size * nmemb;
+	size_t total_size = size * nmemb;
 	std::string *str = static_cast<std::string *>(userp);
-	str->append(static_cast<char *>(contents), totalSize);
-	return totalSize;
+	str->append(static_cast<char *>(contents), total_size);
+	return total_size;
 }
 
 static size_t RequestHeaderCallback(void *contents, size_t size, size_t nmemb, void *userp) {
-	size_t totalSize = size * nmemb;
-	std::string header(static_cast<char *>(contents), totalSize);
+	size_t total_size = size * nmemb;
+	std::string header(static_cast<char *>(contents), total_size);
 	HeaderCollector *header_collection = static_cast<HeaderCollector *>(userp);
 
 	// Trim trailing \r\n
@@ -82,8 +88,10 @@ static size_t RequestHeaderCallback(void *contents, size_t size, size_t nmemb, v
 	}
 	// TODO: log headers that don't follow the header format
 
-	return totalSize;
+	return total_size;
 }
+
+}  // namespace
 
 CURLHandle::CURLHandle(const string &token, const string &cert_path) {
 	curl = curl_easy_init();
@@ -102,8 +110,6 @@ CURLHandle::CURLHandle(const string &token, const string &cert_path) {
 CURLHandle::~CURLHandle() {
 	curl_easy_cleanup(curl);
 }
-
-static idx_t httpfs_client_count = 0;
 
 class HTTPFSCurlClient : public HTTPClient {
 public:
@@ -398,13 +404,7 @@ private:
 	optional_ptr<HTTPState> state;
 	unique_ptr<RequestInfo> request_info;
 
-	static std::mutex &GetRefLock() {
-		static std::mutex mtx;
-		return mtx;
-	}
-
 	static void InitCurlGlobal() {
-		GetRefLock();
 		if (httpfs_client_count == 0) {
 			curl_global_init(CURL_GLOBAL_DEFAULT);
 		}
@@ -414,7 +414,6 @@ private:
 	static void DestroyCurlGlobal() {
 		// TODO: when to call curl_global_cleanup()
 		// calling it on client destruction causes SSL errors when verification is on (due to many requests).
-		// GetRefLock();
 		// if (httpfs_client_count == 0) {
 		// 	throw InternalException("Destroying Httpfs client that did not initialize CURL");
 		// }
