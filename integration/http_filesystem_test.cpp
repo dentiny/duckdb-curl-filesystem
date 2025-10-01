@@ -10,12 +10,12 @@
 #include "duckdb/common/http_util.hpp"
 #include "duckdb/common/string.hpp"
 #include "duckdb/common/unique_ptr.hpp"
-#include "multi_curl_manager.hpp"
-#include "httpfs.hpp"
-#include "duckdb/main/database.hpp"
-#include "duckdb/main/client_context_file_opener.hpp"
-#include "duckdb/main/client_context.hpp"
 #include "duckdb/common/vector.hpp"
+#include "duckdb/main/database.hpp"
+#include "duckdb/main/client_context.hpp"
+#include "duckdb/main/client_context_file_opener.hpp"
+#include "httpfs.hpp"
+#include "multi_curl_manager.hpp"
 
 using namespace duckdb;
 
