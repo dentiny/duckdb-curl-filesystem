@@ -15,7 +15,14 @@
 namespace duckdb {
 
 struct GlobalInfo {
+#ifdef __linux__
 	int epoll_fd = -1;
+	int timer_fd = -1;
+	int event_fd = -1;
+#elif defined(__APPLE__)
+	int kq_fd = -1;
+	int event_ident = -1;
+#endif
 	int timer_fd = -1;
 	int event_fd = -1;
 	CURLM *multi = nullptr;
@@ -39,7 +46,7 @@ public:
 private:
 	MultiCurlManager();
 
-	// Epoll-based eventloop.
+	// Eventloop implementation.
 	void HandleEvent();
 	// Process all pending requests and bind easy curl handle with multi curl handle.
 	void ProcessPendingRequests();
