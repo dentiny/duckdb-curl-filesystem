@@ -281,6 +281,7 @@ MultiCurlManager::MultiCurlManager() : global_info(make_uniq<GlobalInfo>()) {
 	global_info->timer_fd = timer_fd;
 	global_info->event_fd = event_fd;
 
+	// Create and initialize multi-curl.
 #elif defined(__APPLE__)
 	int kq = kqueue();
 	SYSCALL_EXIT_IF_ERROR(kq);
@@ -311,7 +312,7 @@ void MultiCurlManager::HandleEvent() {
 #endif
 	while (true) {
 #ifdef __linux__
-		const int nfds = epoll_wait(global_info->epoll_fd, events.data(), events.size(), -1);
+		const int nfds = epoll_wait(global_info->epoll_fd, events.data(), events.size(), /*timeout=*/-1);
 #elif defined(__APPLE__)
 		const int nfds = kevent(global_info->kq_fd, nullptr, 0, events.data(), events.size(), nullptr);
 #endif
@@ -376,6 +377,8 @@ unique_ptr<HTTPResponse> MultiCurlManager::HandleRequest(unique_ptr<CurlRequest>
 		std::lock_guard<std::mutex> lck(mu);
 		pending_requests.emplace(std::move(request));
 	}
+
+	// Notify epoll to wakeup and process request.
 #ifdef __linux__
 	uint64_t one = 1;
 	const ssize_t ret = write(global_info->event_fd, &one, sizeof(one));
