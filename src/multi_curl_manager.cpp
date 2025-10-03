@@ -2,14 +2,21 @@
 
 #include <array>
 #include <cstring>
-#include <sys/epoll.h>
-#include <sys/eventfd.h>
-#include <sys/timerfd.h>
 #include <unistd.h>
 
 #include "duckdb/common/helper.hpp"
 #include "duckdb/common/unique_ptr.hpp"
 #include "syscall_macros.hpp"
+
+// Platform headers
+#ifdef __linux__
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
+#include <sys/timerfd.h>
+#elif defined(__APPLE__)
+#include <sys/event.h>
+#include <sys/time.h>
+#endif
 
 namespace duckdb {
 
@@ -54,6 +61,8 @@ void CheckMulti(GlobalInfo *g) {
 	}
 }
 
+#ifdef __linux__
+
 void TimerCallback(GlobalInfo *g, int revents) {
 	uint64_t count = 0;
 	// Epoll leverages reactor model, need to read active bytes out.
@@ -79,9 +88,8 @@ void EventCallback(GlobalInfo *g, int fd, int revents) {
 }
 
 void RemoveSockInfo(SockInfo *f, GlobalInfo *g) {
-	if (f == nullptr) {
+	if (f == nullptr)
 		return;
-	}
 	if (f->sockfd != 0) {
 		const int ret = epoll_ctl(g->epoll_fd, EPOLL_CTL_DEL, f->sockfd, NULL);
 		SYSCALL_THROW_IF_ERROR(ret);
@@ -151,6 +159,87 @@ int MultiTimerCallback(CURLM *multi, long timeout_ms, GlobalInfo *g) {
 	return 0;
 }
 
+#elif defined(__APPLE__)
+
+void EventCallback(GlobalInfo *g, int fd, int filter) {
+	int action = 0;
+	if (filter == EVFILT_READ) {
+		action |= CURL_CSELECT_IN;
+	}
+	if (filter == EVFILT_WRITE) {
+		action |= CURL_CSELECT_OUT;
+	}
+	curl_multi_socket_action(g->multi, fd, action, &g->still_running);
+	CheckMulti(g);
+}
+
+void RemoveSockInfo(SockInfo *f, GlobalInfo *g) {
+	if (f == nullptr) {
+		return;
+	}
+	if (f->sockfd != 0) {
+		struct kevent ev[2];
+		EV_SET(&ev[0], f->sockfd, EVFILT_READ, EV_DELETE, 0, 0, nullptr);
+		EV_SET(&ev[1], f->sockfd, EVFILT_WRITE, EV_DELETE, 0, 0, nullptr);
+		kevent(g->kq_fd, ev, 2, nullptr, 0, nullptr);
+	}
+	delete f;
+}
+
+void SetSockInfo(SockInfo *f, curl_socket_t s, CURL *e, int act, GlobalInfo *g) {
+	f->sockfd = s;
+	f->action = act;
+	f->easy = e;
+	struct kevent ev[2];
+	int n = 0;
+	if (act & CURL_POLL_IN) {
+		EV_SET(&ev[n++], s, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, nullptr);
+	}
+	if (act & CURL_POLL_OUT) {
+		EV_SET(&ev[n++], s, EVFILT_WRITE, EV_ADD | EV_ENABLE, 0, 0, nullptr);
+	}
+	if (n > 0) {
+		kevent(g->kq_fd, ev, n, nullptr, 0, nullptr);
+	}
+}
+
+void AddSockInfo(curl_socket_t s, CURL *easy, int action, GlobalInfo *g) {
+	auto *fdp = new SockInfo();
+	fdp->global = g;
+	SetSockInfo(fdp, s, easy, action, g);
+	curl_multi_assign(g->multi, s, fdp);
+}
+
+int SocketCallback(CURL *e, curl_socket_t s, int what, void *cbp, void *sockp) {
+	auto *g = static_cast<GlobalInfo *>(cbp);
+	auto *fdp = static_cast<SockInfo *>(sockp);
+	if (what == CURL_POLL_REMOVE) {
+		RemoveSockInfo(fdp, g);
+		return 0;
+	}
+	if (fdp == nullptr) {
+		AddSockInfo(s, e, what, g);
+		return 0;
+	}
+	SetSockInfo(fdp, s, e, what, g);
+	return 0;
+}
+
+int MultiTimerCallback(CURLM *multi, long timeout_ms, GlobalInfo *g) {
+	struct kevent ev;
+	if (timeout_ms > 0) {
+		EV_SET(&ev, 1, EVFILT_TIMER, EV_ADD | EV_ENABLE, 0, timeout_ms, nullptr);
+	} else if (timeout_ms == 0) {
+		EV_SET(&ev, 1, EVFILT_TIMER, EV_ADD | EV_ENABLE, 0, 1, nullptr);
+	} else {
+		EV_SET(&ev, 1, EVFILT_TIMER, EV_DELETE, 0, 0, nullptr);
+	}
+	kevent(g->kq_fd, &ev, 1, nullptr, 0, nullptr);
+	return 0;
+}
+
+#endif
+
 } // namespace
 
 /*static*/ MultiCurlManager &MultiCurlManager::GetInstance() {
@@ -159,6 +248,7 @@ int MultiTimerCallback(CURLM *multi, long timeout_ms, GlobalInfo *g) {
 }
 
 MultiCurlManager::MultiCurlManager() : global_info(make_uniq<GlobalInfo>()) {
+#ifdef __linux__
 	int epoll_fd = epoll_create1(EPOLL_CLOEXEC);
 	SYSCALL_EXIT_IF_ERROR(epoll_fd);
 
@@ -191,7 +281,18 @@ MultiCurlManager::MultiCurlManager() : global_info(make_uniq<GlobalInfo>()) {
 	global_info->timer_fd = timer_fd;
 	global_info->event_fd = event_fd;
 
-	// Create and initialize multi-curl.
+#elif defined(__APPLE__)
+	int kq = kqueue();
+	SYSCALL_EXIT_IF_ERROR(kq);
+
+	struct kevent ev;
+	EV_SET(&ev, 42, EVFILT_USER, EV_ADD | EV_CLEAR, NOTE_FFNOP, 0, nullptr);
+	kevent(kq, &ev, 1, nullptr, 0, nullptr);
+
+	global_info->kq_fd = kq;
+	global_info->event_ident = 42;
+#endif
+
 	global_info->multi = curl_multi_init();
 	curl_multi_setopt(global_info->multi, CURLMOPT_MAX_HOST_CONNECTIONS, DEFAULT_MAX_CONN_PER_HOST);
 	curl_multi_setopt(global_info->multi, CURLMOPT_SOCKETFUNCTION, SocketCallback);
@@ -203,9 +304,17 @@ MultiCurlManager::MultiCurlManager() : global_info(make_uniq<GlobalInfo>()) {
 }
 
 void MultiCurlManager::HandleEvent() {
+#ifdef __linux__
 	std::array<epoll_event, 32> events {};
+#elif defined(__APPLE__)
+	std::array<struct kevent, 32> events {};
+#endif
 	while (true) {
-		const int nfds = epoll_wait(global_info->epoll_fd, events.data(), events.size(), /*timeout=*/-1);
+#ifdef __linux__
+		const int nfds = epoll_wait(global_info->epoll_fd, events.data(), events.size(), -1);
+#elif defined(__APPLE__)
+		const int nfds = kevent(global_info->kq_fd, nullptr, 0, events.data(), events.size(), nullptr);
+#endif
 		if (nfds < 0) {
 			if (errno == EINTR) {
 				continue;
@@ -213,6 +322,7 @@ void MultiCurlManager::HandleEvent() {
 			SYSCALL_THROW_IF_ERROR(nfds);
 		}
 		for (int idx = 0; idx < nfds; ++idx) {
+#ifdef __linux__
 			if (events[idx].data.fd == global_info->timer_fd) {
 				TimerCallback(global_info.get(), events[idx].events);
 			} else if (events[idx].data.fd == global_info->event_fd) {
@@ -223,6 +333,17 @@ void MultiCurlManager::HandleEvent() {
 			} else {
 				EventCallback(global_info.get(), events[idx].data.fd, events[idx].events);
 			}
+#elif defined(__APPLE__)
+			auto &ev = events[idx];
+			if (ev.filter == EVFILT_TIMER) {
+				curl_multi_socket_action(global_info->multi, CURL_SOCKET_TIMEOUT, 0, &global_info->still_running);
+				CheckMulti(global_info.get());
+			} else if (ev.filter == EVFILT_USER && ev.ident == global_info->event_ident) {
+				ProcessPendingRequests();
+			} else if (ev.filter == EVFILT_READ || ev.filter == EVFILT_WRITE) {
+				EventCallback(global_info.get(), (int)ev.ident, ev.filter);
+			}
+#endif
 		}
 	}
 }
@@ -255,12 +376,15 @@ unique_ptr<HTTPResponse> MultiCurlManager::HandleRequest(unique_ptr<CurlRequest>
 		std::lock_guard<std::mutex> lck(mu);
 		pending_requests.emplace(std::move(request));
 	}
-
-	// Notify epoll to wakeup and process request.
+#ifdef __linux__
 	uint64_t one = 1;
 	const ssize_t ret = write(global_info->event_fd, &one, sizeof(one));
 	D_ASSERT(ret == sizeof(one));
-
+#elif defined(__APPLE__)
+	struct kevent ev;
+	EV_SET(&ev, global_info->event_ident, EVFILT_USER, 0, NOTE_TRIGGER, 0, nullptr);
+	kevent(global_info->kq_fd, &ev, 1, nullptr, 0, nullptr);
+#endif
 	return resp_fut.get();
 }
 
