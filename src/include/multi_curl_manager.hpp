@@ -21,10 +21,10 @@ struct GlobalInfo {
 	int event_fd = -1;
 #elif defined(__APPLE__)
 	int kq_fd = -1;
+	// Used for event notification.
 	int event_ident = -1;
 #endif
-	int timer_fd = -1;
-	int event_fd = -1;
+
 	CURLM *multi = nullptr;
 	int still_running = 0;
 	// Only accessed in the background thread.
