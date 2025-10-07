@@ -9,7 +9,7 @@ It's 100% compatible with `httpfs` extension, all advanced features are implemen
 ## Usage
 ```sql
 -- Install and load the curl_httpfs extension
-FORCE INSTALL curl_httpfs;
+FORCE INSTALL curl_httpfs FROM community;
 LOAD curl_httpfs;
 
 -- Users could access file as usual.
