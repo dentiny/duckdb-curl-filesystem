@@ -1,3 +1,9 @@
+# 0.2.1
+
+## Changed
+
+- Upgrade duckdb to v1.4.1, and upgrade extension-ci to latest
+
 # 0.2.0
 
 ## Added
