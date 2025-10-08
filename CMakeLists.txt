@@ -29,7 +29,9 @@ set(EXTENSION_SOURCES
     src/httpfs_curl_client.cpp
     src/httpfs_httplib_client.cpp
     src/multi_curl_manager.cpp
-    src/s3fs.cpp)
+    src/s3fs.cpp
+    src/thread_pool.cpp
+    src/thread_utils.cpp)
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
@@ -49,8 +51,15 @@ install(
 # Test cases.
 include_directories(duckdb/third_party/catch)
 
+add_executable(test_thread_pool unit/test_thread_pool.cpp)
+target_link_libraries(test_thread_pool ${EXTENSION_NAME})
+
 add_executable(multi_curl_manager_test integration/multi_curl_manager_test.cpp)
 target_link_libraries(multi_curl_manager_test ${EXTENSION_NAME})
 
 add_executable(http_filesystem_test integration/http_filesystem_test.cpp)
 target_link_libraries(http_filesystem_test ${EXTENSION_NAME})
+
+# Benchmark
+add_executable(multicurl_benchmark benchmark/multicurl_benchmark.cpp)
+target_link_libraries(multicurl_benchmark ${EXTENSION_NAME})
