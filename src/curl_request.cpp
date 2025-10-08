@@ -1,6 +1,7 @@
 #include "curl_request.hpp"
 
 #include "duckdb/common/assert.hpp"
+#include "extension_config.hpp"
 
 namespace duckdb {
 
@@ -10,8 +11,10 @@ CurlRequest::CurlRequest(CURL *easy_curl_p) : info(make_uniq<RequestInfo>()), ea
 	curl_easy_setopt(easy_curl, CURLOPT_WRITEFUNCTION, CurlRequest::WriteBody);
 	curl_easy_setopt(easy_curl, CURLOPT_WRITEDATA, this);
 	curl_easy_setopt(easy_curl, CURLOPT_PRIVATE, this);
-	// TODO(hjiang): Enable verbose logging when enabled.
-	// curl_easy_setopt(easy, CURLOPT_VERBOSE, 1L);
+
+	if (ENABLE_CURL_VERBOSE_LOGGING) {
+		curl_easy_setopt(easy_curl, CURLOPT_VERBOSE, 1L);
+	}
 }
 
 CurlRequest::~CurlRequest() = default;
