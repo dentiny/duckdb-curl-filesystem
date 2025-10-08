@@ -23,8 +23,11 @@ using namespace duckdb; // NOLINT
 
 // Spawn a number of threads for concurrent IO requests.
 constexpr size_t CONCURRENCY = 2000;
+// Benchmark iteration count.
+constexpr idx_t ITERATION_COUNT = 5;
 // Test block sizes.
-constexpr std::array<idx_t, 7> TEST_BLOCK_SIZES = {16, 128, 1024, 8 * 1024, 64 * 1024, 512 * 1024, 2 * 1024 * 1024};
+constexpr std::array<idx_t, 7> TEST_BLOCK_SIZES = {32,         256,         2 * 1024,       16 * 1024,
+                                                   128 * 1024, 1024 * 1024, 2 * 1024 * 1024};
 
 // Handle single IO request: one HEAD request + one GET request.
 void HandleSingleRequest(ClientContextFileOpener *file_opener, idx_t start_offset, idx_t bytes_to_read,
@@ -64,8 +67,10 @@ void PerformBenchmarkImpl(shared_ptr<HTTPFSUtil> httpfs_util, idx_t block_size) 
 // Benchmark httplib-based http filesystem.
 void BenchmarkHttplib(idx_t block_size) {
 	const auto start = std::chrono::steady_clock::now();
-	auto http_util = make_shared_ptr<HTTPFSUtil>();
-	PerformBenchmarkImpl(std::move(http_util), block_size);
+	for (idx_t ii = 0; ii < ITERATION_COUNT; ++ii) {
+		auto http_util = make_shared_ptr<HTTPFSUtil>();
+		PerformBenchmarkImpl(std::move(http_util), block_size);
+	}
 	const auto end = std::chrono::steady_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 	std::cout << "httplib-based IO operation with block size " << block_size << " takes " << duration.count()
@@ -75,8 +80,10 @@ void BenchmarkHttplib(idx_t block_size) {
 // Benchmark multi-curl-based http filesystem.
 void BenchmarkMultiCurl(idx_t block_size) {
 	const auto start = std::chrono::steady_clock::now();
-	auto http_util = make_shared_ptr<HTTPFSCurlUtil>();
-	PerformBenchmarkImpl(std::move(http_util), block_size);
+	for (idx_t ii = 0; ii < ITERATION_COUNT; ++ii) {
+		auto http_util = make_shared_ptr<HTTPFSCurlUtil>();
+		PerformBenchmarkImpl(std::move(http_util), block_size);
+	}
 	const auto end = std::chrono::steady_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 	std::cout << "multi-curl-based IO operation with block size " << block_size << " takes " << duration.count()
