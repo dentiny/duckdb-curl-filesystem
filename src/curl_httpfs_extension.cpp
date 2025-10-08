@@ -3,6 +3,7 @@
 #include "httpfs_client.hpp"
 #include "create_secret_functions.hpp"
 #include "duckdb.hpp"
+#include "extension_config.hpp"
 #include "s3fs.hpp"
 #include "hffs.hpp"
 #ifdef OVERRIDE_ENCRYPTION_UTILS
@@ -107,6 +108,14 @@ static void LoadInternal(ExtensionLoader &loader) {
 		// By default to use curl utils.
 		config.http_util = make_shared_ptr<HTTPFSCurlUtil>();
 	}
+
+	// Provide option to enable verbose logging for curl-based implementation.
+	auto callback_set_curl_verbose_logging = [](ClientContext &context, SetScope scope, Value &parameter) {
+		ENABLE_CURL_VERBOSE_LOGGING = parameter.GetValue<bool>();
+	};
+	config.AddExtensionOption("httpfs_curl_enable_verbose_logging",
+	                          "Turn on and off curl-based http util verbose logging.", LogicalType::BOOLEAN, false,
+	                          callback_set_curl_verbose_logging);
 
 	auto provider = make_uniq<AWSEnvironmentCredentialsProvider>(config);
 	provider->SetAll();
