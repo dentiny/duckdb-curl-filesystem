@@ -133,11 +133,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 	loader.RegisterFunction(clear_cache_function);
 
 	// Register TCP connection status function.
-	// WARNING: It works only on linux platform, it displays nothing on MacOs.
 	loader.RegisterFunction(GetTcpConnectionNumFunc());
 
 	// Register httpfs TCP connection status function.
-	// WARNING: It works only on linux platform, it displays nothing on MacOs.
 	loader.RegisterFunction(GetHttpfsTcpConnectionNumFunc());
 
 	auto provider = make_uniq<AWSEnvironmentCredentialsProvider>(config);
