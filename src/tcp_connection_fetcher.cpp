@@ -11,11 +11,11 @@
 #include <unistd.h>
 #include <sstream>
 #include "syscall_macros.hpp"
-#include "tcp_ip_recorder.hpp"
 #endif
 
 #include "duckdb/common/string.hpp"
 #include "duckdb/common/unordered_map.hpp"
+#include "tcp_ip_recorder.hpp"
 
 namespace duckdb {
 
