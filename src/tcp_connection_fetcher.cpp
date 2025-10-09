@@ -1,5 +1,8 @@
 #include "tcp_connection_fetcher.hpp"
 
+#include "duckdb/common/string.hpp"
+#include "duckdb/common/unordered_map.hpp"
+
 //===--------------------------------------------------------------------===//
 // MacOs implementation
 //===--------------------------------------------------------------------===//
@@ -7,9 +10,6 @@
 
 #include <cstdio>
 #include <sstream>
-
-#include "duckdb/common/string.hpp"
-#include "duckdb/common/unordered_map.hpp"
 
 namespace duckdb {
 
@@ -74,7 +74,6 @@ std::unordered_map<std::string, int> GetTcpConnectionNum() {
 #include <unistd.h>
 #include <sstream>
 
-#include "duckdb/common/string.hpp"
 #include "syscall_macros.hpp"
 #include "tcp_ip_recorder.hpp"
 
