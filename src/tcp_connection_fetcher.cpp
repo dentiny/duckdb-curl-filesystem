@@ -4,13 +4,14 @@
 // MacOs implementation
 //===--------------------------------------------------------------------===//
 #if defined(__APPLE__) && defined(__MACH__)
-namespace duckdb {
 
 #include <cstdio>
 #include <sstream>
 
 #include "duckdb/common/string.hpp"
 #include "duckdb/common/unordered_map.hpp"
+
+namespace duckdb {
 
 std::unordered_map<std::string, int> GetTcpConnectionNum() {
 	std::unordered_map<std::string, int> aggregated_tcp_conns;
