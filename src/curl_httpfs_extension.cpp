@@ -9,8 +9,18 @@
 #ifdef OVERRIDE_ENCRYPTION_UTILS
 #include "crypto.hpp"
 #endif // OVERRIDE_ENCRYPTION_UTILS
+#include "tcp_connection_query_function.hpp"
+#include "tcp_ip_recorder.hpp"
 
 namespace duckdb {
+
+// Clear internal metrics collection.
+static void ClearAllCache(const DataChunk &args, ExpressionState &state, Vector &result) {
+	TcpIpRecorder::GetInstance().Clear();
+
+	constexpr bool SUCCESS = true;
+	result.Reference(Value(SUCCESS));
+}
 
 static void LoadInternal(ExtensionLoader &loader) {
 	auto &instance = loader.GetDatabaseInstance();
@@ -113,9 +123,22 @@ static void LoadInternal(ExtensionLoader &loader) {
 	auto callback_set_curl_verbose_logging = [](ClientContext &context, SetScope scope, Value &parameter) {
 		ENABLE_CURL_VERBOSE_LOGGING = parameter.GetValue<bool>();
 	};
-	config.AddExtensionOption("httpfs_curl_enable_verbose_logging",
+	config.AddExtensionOption("curl_httpfs_enable_verbose_logging",
 	                          "Turn on and off curl-based http util verbose logging.", LogicalType::BOOLEAN, false,
 	                          callback_set_curl_verbose_logging);
+
+	// Clear extension internal metrics collection.
+	ScalarFunction clear_cache_function("curl_httpfs_clear_metrics", /*arguments=*/ {},
+	                                    /*return_type=*/LogicalType::BOOLEAN, ClearAllCache);
+	loader.RegisterFunction(clear_cache_function);
+
+	// Register TCP connection status function.
+	// WARNING: It works only on linux platform, it displays nothing on MacOs.
+	loader.RegisterFunction(GetTcpConnectionNumFunc());
+
+	// Register httpfs TCP connection status function.
+	// WARNING: It works only on linux platform, it displays nothing on MacOs.
+	loader.RegisterFunction(GetHttpfsTcpConnectionNumFunc());
 
 	auto provider = make_uniq<AWSEnvironmentCredentialsProvider>(config);
 	provider->SetAll();
