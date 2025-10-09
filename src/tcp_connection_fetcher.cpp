@@ -12,9 +12,8 @@
 #include <sstream>
 
 namespace duckdb {
-
-std::unordered_map<std::string, int> GetTcpConnectionNum() {
-	std::unordered_map<std::string, int> aggregated_tcp_conns;
+unordered_map<string, int> GetTcpConnectionNum() {
+	unordered_map<string, int> aggregated_tcp_conns;
 
 	FILE *fp = popen("netstat -anv -p tcp", "r");
 	if (fp == nullptr) {
@@ -25,17 +24,17 @@ std::unordered_map<std::string, int> GetTcpConnectionNum() {
 
 	// Skip the header
 	while (fgets(line, sizeof(line), fp)) {
-		std::string s(line);
-		if (s.find("Proto") != std::string::npos) {
+		string s(line);
+		if (s.find("Proto") != string::npos) {
 			break;
 		}
 	}
 
 	while (fgets(line, sizeof(line), fp)) {
-		std::string s(line);
+		string s(line);
 		std::istringstream iss(s);
 
-		std::string proto, recvq, sendq, local, remote, state;
+		string proto, recvq, sendq, local, remote, state;
 		iss >> proto >> recvq >> sendq >> local >> remote >> state;
 
 		if (proto != "tcp" && proto != "tcp4" && proto != "tcp6") {
@@ -47,13 +46,13 @@ std::unordered_map<std::string, int> GetTcpConnectionNum() {
 
 		// Extract IP (before ':').
 		auto colon = remote.find('.');
-		if (colon == std::string::npos)
+		if (colon == string::npos)
 			continue;
 
 		// IPv4 style “remote.port”.
 		// We can find the *last* '.' as separator.
 		size_t last_dot = remote.rfind('.');
-		std::string ip = (last_dot == std::string::npos) ? remote : remote.substr(0, last_dot);
+		string ip = (last_dot == string::npos) ? remote : remote.substr(0, last_dot);
 		++aggregated_tcp_conns[std::move(ip)];
 	}
 
@@ -83,7 +82,7 @@ namespace {
 constexpr const char *IPV4_TCP_PROC_FS_PATH = "/proc/net/tcp";
 constexpr const char *IPV6_TCP_PROC_FS_PATH = "/proc/net/tcp6";
 
-string HexToIP(const std::string &hex) {
+string HexToIP(const string &hex) {
 	if (hex.size() != 8) {
 		return "0.0.0.0";
 	}
@@ -106,7 +105,7 @@ string HexToIP(const std::string &hex) {
 
 // @param path: local procfs path.
 // @param[out] per_remote_ip: aggregated <IP, count> pair.
-void ParseProcTCP(const char *path, std::unordered_map<std::string, int> &per_remote_ip) {
+void ParseProcTCP(const char *path, unordered_map<string, int> &per_remote_ip) {
 	int fd = open(path, O_RDONLY);
 	SYSCALL_THROW_IF_ERROR(fd);
 
@@ -133,7 +132,7 @@ void ParseProcTCP(const char *path, std::unordered_map<std::string, int> &per_re
 		}
 
 		std::istringstream ls(cur_line);
-		std::string sl, local, remote, state;
+		string sl, local, remote, state;
 		ls >> sl >> local >> remote >> state;
 		if (remote.empty() || state.empty()) {
 			continue;
@@ -141,7 +140,7 @@ void ParseProcTCP(const char *path, std::unordered_map<std::string, int> &per_re
 
 		// Parse remote address (format: "HEX_IP:HEX_PORT").
 		auto colon = remote.find(':');
-		if (colon == std::string::npos) {
+		if (colon == string::npos) {
 			continue;
 		}
 		string ip_hex = remote.substr(0, colon);
