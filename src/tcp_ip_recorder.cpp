@@ -3,7 +3,7 @@
 namespace duckdb {
 
 /*static*/ TcpIpRecorder &TcpIpRecorder::GetInstance() {
-	auto *tcp_ip_recorder = new TcpIpRecorder {};
+	static auto *tcp_ip_recorder = new TcpIpRecorder {};
 	return *tcp_ip_recorder;
 }
 
