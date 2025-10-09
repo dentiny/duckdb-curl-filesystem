@@ -30,6 +30,9 @@ set(EXTENSION_SOURCES
     src/httpfs_httplib_client.cpp
     src/multi_curl_manager.cpp
     src/s3fs.cpp
+    src/tcp_connection_fetcher.cpp
+    src/tcp_connection_query_function.cpp
+    src/tcp_ip_recorder.cpp
     src/thread_pool.cpp
     src/thread_utils.cpp)
 
