@@ -1,17 +1,29 @@
 #include "tcp_connection_fetcher.hpp"
 
+#if defined(__APPLE__) || defined(__MACH__)
+#include <cstdio>
+#include <sstream>
+#else
+#include <arpa/inet.h>
+#include <array>
+#include <fcntl.h>
+#include <iostream>
+#include <unistd.h>
+#include <sstream>
+#include "syscall_macros.hpp"
+#include "tcp_ip_recorder.hpp"
+#endif
+
 #include "duckdb/common/string.hpp"
 #include "duckdb/common/unordered_map.hpp"
+
+namespace duckdb {
 
 //===--------------------------------------------------------------------===//
 // MacOs implementation
 //===--------------------------------------------------------------------===//
 #if defined(__APPLE__) || defined(__MACH__)
 
-#include <cstdio>
-#include <sstream>
-
-namespace duckdb {
 unordered_map<string, int> GetTcpConnectionNum() {
 	unordered_map<string, int> aggregated_tcp_conns;
 
@@ -59,24 +71,11 @@ unordered_map<string, int> GetTcpConnectionNum() {
 	pclose(fp);
 	return aggregated_tcp_conns;
 }
-} // namespace duckdb
 
 //===--------------------------------------------------------------------===//
 // Linux implementation
 //===--------------------------------------------------------------------===//
 #else
-
-#include <arpa/inet.h>
-#include <array>
-#include <fcntl.h>
-#include <iostream>
-#include <unistd.h>
-#include <sstream>
-
-#include "syscall_macros.hpp"
-#include "tcp_ip_recorder.hpp"
-
-namespace duckdb {
 
 namespace {
 constexpr const char *IPV4_TCP_PROC_FS_PATH = "/proc/net/tcp";
