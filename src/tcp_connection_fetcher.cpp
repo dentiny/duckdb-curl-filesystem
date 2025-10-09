@@ -1,11 +1,69 @@
 #include "tcp_connection_fetcher.hpp"
 
+//===--------------------------------------------------------------------===//
+// MacOs implementation
+//===--------------------------------------------------------------------===//
 #if defined(__APPLE__) && defined(__MACH__)
 namespace duckdb {
-unordered_map<string, int> GetTcpConnectionNum() {
-	return {};
+
+#include <cstdio>
+#include <sstream>
+
+#include "duckdb/common/string.hpp"
+#include "duckdb/common/unordered_map.hpp"
+
+std::unordered_map<std::string, int> GetTcpConnectionNum() {
+	std::unordered_map<std::string, int> aggregated_tcp_conns;
+
+	FILE *fp = popen("netstat -anv -p tcp", "r");
+	if (fp == nullptr) {
+		throw std::runtime_error("failed to run netstat");
+	}
+
+	char line[512];
+
+	// Skip the header
+	while (fgets(line, sizeof(line), fp)) {
+		std::string s(line);
+		if (s.find("Proto") != std::string::npos) {
+			break;
+		}
+	}
+
+	while (fgets(line, sizeof(line), fp)) {
+		std::string s(line);
+		std::istringstream iss(s);
+
+		std::string proto, recvq, sendq, local, remote, state;
+		iss >> proto >> recvq >> sendq >> local >> remote >> state;
+
+		if (proto != "tcp" && proto != "tcp4" && proto != "tcp6") {
+			continue;
+		}
+		if (remote.empty() || state.empty()) {
+			continue;
+		}
+
+		// Extract IP (before ':').
+		auto colon = remote.find('.');
+		if (colon == std::string::npos)
+			continue;
+
+		// IPv4 style “remote.port”.
+		// We can find the *last* '.' as separator.
+		size_t last_dot = remote.rfind('.');
+		std::string ip = (last_dot == std::string::npos) ? remote : remote.substr(0, last_dot);
+		++aggregated_tcp_conns[std::move(ip)];
+	}
+
+	pclose(fp);
+	return aggregated_tcp_conns;
 }
 } // namespace duckdb
+
+//===--------------------------------------------------------------------===//
+// Linux implementation
+//===--------------------------------------------------------------------===//
 #else
 
 #include <arpa/inet.h>
@@ -101,6 +159,8 @@ unordered_map<string, int> GetTcpConnectionNum() {
 	return aggregated_tcp_conns;
 }
 
+#endif
+
 unordered_map<string, int> GetHttpfsTcpConnectionNum() {
 	auto all_ips = TcpIpRecorder::GetInstance().GetAllIps();
 	const auto tcp_conns = GetTcpConnectionNum();
@@ -117,5 +177,3 @@ unordered_map<string, int> GetHttpfsTcpConnectionNum() {
 }
 
 } // namespace duckdb
-
-#endif
