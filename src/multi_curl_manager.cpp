@@ -254,7 +254,9 @@ MultiCurlManager::MultiCurlManager() : global_info(make_uniq<GlobalInfo>()) {
 	SYSCALL_EXIT_IF_ERROR(epoll_fd);
 
 	// Create timerfd and add to epoll.
-	int timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+	//
+	// Use CLOCK_BOOTTIME instead of CLOCK_MONOTONIC, since the former considers system suspension time.
+	int timer_fd = timerfd_create(CLOCK_BOOTTIME, TFD_NONBLOCK | TFD_CLOEXEC);
 	SYSCALL_EXIT_IF_ERROR(timer_fd);
 
 	struct itimerspec its;
@@ -296,6 +298,8 @@ MultiCurlManager::MultiCurlManager() : global_info(make_uniq<GlobalInfo>()) {
 #endif
 
 	global_info->multi = curl_multi_init();
+	// IO multiplexing requires HTTP/2 or HTTP/3.
+	curl_multi_setopt(global_info->multi, CURLMOPT_PIPELINING, CURLPIPE_MULTIPLEX);
 	curl_multi_setopt(global_info->multi, CURLMOPT_MAX_HOST_CONNECTIONS, DEFAULT_MAX_CONN_PER_HOST);
 	curl_multi_setopt(global_info->multi, CURLMOPT_SOCKETFUNCTION, SocketCallback);
 	curl_multi_setopt(global_info->multi, CURLMOPT_SOCKETDATA, global_info.get());
