@@ -1,6 +1,5 @@
 #pragma once
 
-
 namespace duckdb {
 
 // Get the number of cores available to the system.

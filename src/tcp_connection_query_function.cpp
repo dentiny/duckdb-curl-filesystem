@@ -43,8 +43,8 @@ unique_ptr<FunctionData> GetTcpConnectionNumFuncBind(ClientContext &context, Tab
 	return_types.reserve(2);
 	names.reserve(2);
 
-	return_types.emplace_back(LogicalType{LogicalTypeId::VARCHAR});
-	return_types.emplace_back(LogicalType{LogicalTypeId::BIGINT});
+	return_types.emplace_back(LogicalType {LogicalTypeId::VARCHAR});
+	return_types.emplace_back(LogicalType {LogicalTypeId::BIGINT});
 	names.emplace_back("IP");
 	names.emplace_back("TCP connection number");
 
@@ -110,8 +110,8 @@ unique_ptr<FunctionData> GetHttpfsTcpConnectionNumFuncBind(ClientContext &contex
 	return_types.reserve(2);
 	names.reserve(2);
 
-	return_types.emplace_back(LogicalType{LogicalTypeId::VARCHAR});
-	return_types.emplace_back(LogicalType{LogicalTypeId::BIGINT});
+	return_types.emplace_back(LogicalType {LogicalTypeId::VARCHAR});
+	return_types.emplace_back(LogicalType {LogicalTypeId::BIGINT});
 	names.emplace_back("IP");
 	names.emplace_back("TCP connection number");
 
