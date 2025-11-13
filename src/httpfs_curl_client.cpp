@@ -114,6 +114,10 @@ CURLHandle::~CURLHandle() {
 class HTTPFSCurlClient : public HTTPClient {
 public:
 	HTTPFSCurlClient(HTTPFSParams &http_params, const string &proto_host_port) {
+		Initialize(http_params);
+	}
+	void Initialize(HTTPParams &http_p) override {
+		HTTPFSParams &http_params = reinterpret_cast<HTTPFSParams &>(http_p);
 		auto bearer_token = "";
 		if (!http_params.bearer_token.empty()) {
 			bearer_token = http_params.bearer_token.c_str();
