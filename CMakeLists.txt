@@ -5,6 +5,8 @@ set(TARGET_NAME curl_httpfs)
 
 set(CMAKE_CXX_STANDARD 14)
 
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-c++17-extensions")
+
 find_package(OpenSSL REQUIRED)
 find_package(CURL REQUIRED)
 
