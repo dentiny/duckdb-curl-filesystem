@@ -11,7 +11,7 @@ public:
 		client = make_uniq<duckdb_httplib_openssl::Client>(proto_host_port);
 		Initialize(http_params);
 	}
-	void Initialize(HTTPParams &http_p) override {
+	void Initialize(HTTPParams &http_p) {
 		HTTPFSParams &http_params = reinterpret_cast<HTTPFSParams &>(http_p);
 		client->set_follow_location(http_params.follow_location);
 		client->set_keep_alive(http_params.keep_alive);
