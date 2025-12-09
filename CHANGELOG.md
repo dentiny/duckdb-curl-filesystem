@@ -1,3 +1,7 @@
+# 0.2.3
+
+- Upgrade duckdb and extension-ci-tools to v1.4.3
+
 # 0.2.2
 
 ## Add
