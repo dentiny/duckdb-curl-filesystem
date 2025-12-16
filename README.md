@@ -1,12 +1,12 @@
-# curl_httpfs - DuckDB extension for connection pool, HTTP/2 and asynchronous network IO
+# ccurl_httpfs - Bağlantı havuzu, HTTP/2 ve asenkron ağ IO'su için DuckDB eklentisi
 
-## What is curl_httpfs?
+## curl_httpfs nedir?
 
-It's a DuckDB extension that provides additional IO features upon [httpfs extension](https://duckdb.org/docs/stable/core_extensions/httpfs/overview.html), including connection pool, HTTP/2, and async network IO.
+Bağlantı havuzu, HTTP/2 ve asenkron ağ IO'su dahil olmak üzere, [httpfs eklentisi](https://duckdb.org/docs/stable/core_extensions/httpfs/overview.html) üzerine ek IO özellikleri sağlayan bir DuckDB eklentisidir.
 
-It's 100% compatible with `httpfs` extension, all advanced features are implemented based on uses curl-based solution, meanwhile it also allows users to fallback to httplib.
+`httpfs` eklentisi ile %100 uyumludur; tüm gelişmiş özellikler curl tabanlı çözüm kullanılarak uygulanmıştır, bununla birlikte kullanıcıların httplib'e geri dönmesine (fallback) de olanak tanır.
 
-## Usage
+## Kullanım
 ```sql
 -- Install and load the curl_httpfs extension
 FORCE INSTALL curl_httpfs FROM community;
