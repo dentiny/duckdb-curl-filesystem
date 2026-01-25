@@ -1,4 +1,4 @@
-#include "string_util.hpp"
+#include "string_utils.hpp"
 
 namespace duckdb {
 

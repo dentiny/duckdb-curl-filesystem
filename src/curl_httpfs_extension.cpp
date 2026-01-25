@@ -1,4 +1,4 @@
-#include "httpfs_extension.hpp"
+#include "curl_httpfs_extension.hpp"
 
 #include "httpfs_client.hpp"
 #include "create_secret_functions.hpp"
@@ -8,10 +8,6 @@
 #ifdef OVERRIDE_ENCRYPTION_UTILS
 #include "crypto.hpp"
 #endif // OVERRIDE_ENCRYPTION_UTILS
-
-#ifndef EMSCRIPTEN
-#include "httpfs_curl_client.hpp"
-#endif
 
 // Extension-specific header.
 #include "extension_loader_helper.hpp"
