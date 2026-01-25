@@ -2,6 +2,7 @@
 
 #include "duckdb/common/assert.hpp"
 #include "extension_config.hpp"
+#include "string_utils.hpp"
 
 namespace duckdb {
 
@@ -20,7 +21,8 @@ CurlRequest::CurlRequest(CURL *easy_curl_p) : info(make_uniq<RequestInfo>()), ea
 CurlRequest::~CurlRequest() = default;
 
 void CurlRequest::SetUrl(string url) {
-	curl_easy_setopt(easy_curl, CURLOPT_URL, url.c_str());
+	auto encoded_url = EncodeURL(url);
+	curl_easy_setopt(easy_curl, CURLOPT_URL, encoded_url.c_str());
 	info->url = std::move(url);
 }
 void CurlRequest::SetHeaders(curl_slist *headers) {
