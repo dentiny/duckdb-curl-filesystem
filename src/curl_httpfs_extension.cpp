@@ -1,19 +1,24 @@
-#include "curl_httpfs_extension.hpp"
+#include "httpfs_extension.hpp"
 
 #include "httpfs_client.hpp"
 #include "create_secret_functions.hpp"
 #include "duckdb.hpp"
-#include "extension_loader_helper.hpp"
 #include "s3fs.hpp"
 #include "hffs.hpp"
 #ifdef OVERRIDE_ENCRYPTION_UTILS
 #include "crypto.hpp"
 #endif // OVERRIDE_ENCRYPTION_UTILS
+
+#ifndef EMSCRIPTEN
+#include "httpfs_curl_client.hpp"
+#endif
+
+// Extension-specific header.
+#include "extension_loader_helper.hpp"
+
 namespace duckdb {
 
-namespace {
-
-void LoadInternal(ExtensionLoader &loader) {
+static void LoadInternal(ExtensionLoader &loader) {
 	auto &instance = loader.GetDatabaseInstance();
 	auto &fs = instance.GetFileSystem();
 
@@ -49,7 +54,7 @@ void LoadInternal(ExtensionLoader &loader) {
 	config.AddExtensionOption("ca_cert_file", "Path to a custom certificate file for self-signed certificates.",
 	                          LogicalType::VARCHAR, Value(""));
 	// Global S3 config
-	config.AddExtensionOption("s3_region", "S3 Region", LogicalType::VARCHAR, Value("us-east-1"));
+	config.AddExtensionOption("s3_region", "S3 Region", LogicalType::VARCHAR);
 	config.AddExtensionOption("s3_access_key_id", "S3 Access Key ID", LogicalType::VARCHAR);
 	config.AddExtensionOption("s3_secret_access_key", "S3 Access Key", LogicalType::VARCHAR);
 	config.AddExtensionOption("s3_session_token", "S3 Session Token", LogicalType::VARCHAR);
@@ -75,6 +80,9 @@ void LoadInternal(ExtensionLoader &loader) {
 	config.AddExtensionOption("hf_max_per_page", "Debug option to limit number of items returned in list requests",
 	                          LogicalType::UBIGINT, Value::UBIGINT(0));
 
+	config.AddExtensionOption("merge_http_secret_into_s3_request", "Merges http secret params into S3 requests",
+	                          LogicalType::BOOLEAN, Value(true));
+
 	auto callback_httpfs_client_implementation = [](ClientContext &context, SetScope scope, Value &parameter) {
 		auto &config = DBConfig::GetConfig(context);
 		string value = StringValue::Get(parameter);
@@ -85,6 +93,7 @@ void LoadInternal(ExtensionLoader &loader) {
 			throw InvalidInputException("Unsupported option for httpfs_client_implementation, only `wasm` and "
 			                            "`default` are currently supported for duckdb-wasm");
 		}
+#ifndef EMSCRIPTEN
 		if (value == "curl" || value == "default") {
 			if (!config.http_util || config.http_util->GetName() != "HTTPFSUtil-Curl") {
 				config.http_util = make_shared_ptr<HTTPFSCurlUtil>();
@@ -97,16 +106,19 @@ void LoadInternal(ExtensionLoader &loader) {
 			}
 			return;
 		}
+#endif
 		throw InvalidInputException("Unsupported option for httpfs_client_implementation, only `curl`, `httplib` and "
 		                            "`default` are currently supported");
 	};
 	config.AddExtensionOption("httpfs_client_implementation", "Select which is the HTTPUtil implementation to be used",
 	                          LogicalType::VARCHAR, "default", callback_httpfs_client_implementation);
+	config.AddExtensionOption("enable_global_s3_configuration",
+	                          "Automatically fetch AWS credentials from environment variables.", LogicalType::BOOLEAN,
+	                          Value::BOOLEAN(true));
 
 	if (config.http_util && config.http_util->GetName() == "WasmHTTPUtils") {
 		// Already handled, do not override
 	} else {
-		// By default to use curl utils.
 		config.http_util = make_shared_ptr<HTTPFSCurlUtil>();
 	}
 
@@ -116,22 +128,22 @@ void LoadInternal(ExtensionLoader &loader) {
 	CreateS3SecretFunctions::Register(loader);
 	CreateBearerTokenFunctions::Register(loader);
 
+	// Extension-specific setup.
+	LoadExtensionInternal(loader);
+
 #ifdef OVERRIDE_ENCRYPTION_UTILS
 	// set pointer to OpenSSL encryption state
 	config.encryption_util = make_shared_ptr<AESStateSSLFactory>();
 #endif // OVERRIDE_ENCRYPTION_UTILS
 }
-
-} // namespace
-
-void CurlHttpfsExtension::Load(ExtensionLoader &loader) {
+void HttpfsExtension::Load(ExtensionLoader &loader) {
 	LoadInternal(loader);
 }
-std::string CurlHttpfsExtension::Name() {
-	return "curl_httpfs";
+std::string HttpfsExtension::Name() {
+	return "httpfs";
 }
 
-std::string CurlHttpfsExtension::Version() const {
+std::string HttpfsExtension::Version() const {
 #ifdef EXT_VERSION_HTTPFS
 	return EXT_VERSION_HTTPFS;
 #else
@@ -143,7 +155,7 @@ std::string CurlHttpfsExtension::Version() const {
 
 extern "C" {
 
-DUCKDB_CPP_EXTENSION_ENTRY(curl_httpfs, loader) {
+DUCKDB_CPP_EXTENSION_ENTRY(httpfs, loader) {
 	duckdb::LoadInternal(loader);
 }
 }
