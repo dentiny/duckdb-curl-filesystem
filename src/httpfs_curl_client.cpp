@@ -400,6 +400,10 @@ private:
 		response->url = request_info->url;
 		if (!request_info->header_collection.empty()) {
 			for (auto &header : request_info->header_collection.back()) {
+				// We should not return __RESPONSE_STATUS__ to the user. It's only there for debugging.
+				if (header.first == "__RESPONSE_STATUS__") {
+					continue;
+				}
 				response->headers.Insert(header.first, header.second);
 			}
 		}
