@@ -22,6 +22,7 @@ set(EXTENSION_SOURCES
     src/crypto.cpp
     src/curl_httpfs_extension.cpp
     src/curl_request.cpp
+    src/extension_loader_helper.cpp
     src/hash_functions.cpp
     src/hffs.cpp
     src/http_state.cpp
