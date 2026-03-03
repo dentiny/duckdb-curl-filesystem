@@ -10,6 +10,7 @@
 #include "curl_request.hpp"
 #include "duckdb/common/exception/http_exception.hpp"
 #include "multi_curl_manager.hpp"
+#include "string_utils.hpp"
 
 namespace duckdb {
 
@@ -169,7 +170,7 @@ public:
 
 		if (!http_params.http_proxy.empty()) {
 			curl_easy_setopt(*curl, CURLOPT_PROXY,
-			                 StringUtil::Format("%s:%s", http_params.http_proxy, http_params.http_proxy_port).c_str());
+			                 StringUtil::Format("%s:%d", http_params.http_proxy, http_params.http_proxy_port).c_str());
 
 			if (!http_params.http_proxy_username.empty()) {
 				curl_easy_setopt(*curl, CURLOPT_PROXYUSERNAME, http_params.http_proxy_username.c_str());
@@ -227,7 +228,8 @@ public:
 
 		CURLcode res;
 		{
-			curl_easy_setopt(*curl, CURLOPT_URL, request_info->url.c_str());
+			const auto encoded_url = EncodeURL(request_info->url);
+			curl_easy_setopt(*curl, CURLOPT_URL, encoded_url.c_str());
 			// Perform PUT
 			curl_easy_setopt(*curl, CURLOPT_CUSTOMREQUEST, "PUT");
 			// Include PUT body
@@ -282,7 +284,8 @@ public:
 		CURLcode res;
 		{
 			// Set URL
-			curl_easy_setopt(*curl, CURLOPT_URL, request_info->url.c_str());
+			const auto encoded_url = EncodeURL(request_info->url);
+			curl_easy_setopt(*curl, CURLOPT_URL, encoded_url.c_str());
 
 			// Set DELETE request method
 			curl_easy_setopt(*curl, CURLOPT_CUSTOMREQUEST, "DELETE");
@@ -320,7 +323,8 @@ public:
 
 		CURLcode res;
 		{
-			curl_easy_setopt(*curl, CURLOPT_URL, request_info->url.c_str());
+			const auto encoded_url = EncodeURL(request_info->url);
+			curl_easy_setopt(*curl, CURLOPT_URL, encoded_url.c_str());
 			curl_easy_setopt(*curl, CURLOPT_POST, 1L);
 
 			// Set POST body
@@ -396,6 +400,10 @@ private:
 		response->url = request_info->url;
 		if (!request_info->header_collection.empty()) {
 			for (auto &header : request_info->header_collection.back()) {
+				// We should not return __RESPONSE_STATUS__ to the user. It's only there for debugging.
+				if (header.first == "__RESPONSE_STATUS__") {
+					continue;
+				}
 				response->headers.Insert(header.first, header.second);
 			}
 		}

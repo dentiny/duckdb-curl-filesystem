@@ -2,7 +2,6 @@
 
 #include "crypto.hpp"
 #include "duckdb.hpp"
-#ifndef DUCKDB_AMALGAMATION
 #include "duckdb/common/exception/http_exception.hpp"
 #include "duckdb/logging/log_type.hpp"
 #include "duckdb/logging/file_system_logger.hpp"
@@ -11,12 +10,12 @@
 #include "duckdb/common/types/timestamp.hpp"
 #include "duckdb/function/scalar/strftime_format.hpp"
 #include "http_state.hpp"
-#endif
 
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/function/scalar/string_common.hpp"
 #include "duckdb/main/secret/secret_manager.hpp"
 #include "duckdb/storage/buffer_manager.hpp"
+#include "duckdb/common/multi_file/multi_file_list.hpp"
 
 #include "create_secret_functions.hpp"
 
@@ -28,9 +27,9 @@
 
 namespace duckdb {
 
-static HTTPHeaders create_s3_header(string url, string query, string host, string service, string method,
-                                    const S3AuthParams &auth_params, string date_now = "", string datetime_now = "",
-                                    string payload_hash = "", string content_type = "") {
+HTTPHeaders CreateS3Header(string url, string query, string host, string service, string method,
+                           const S3AuthParams &auth_params, string date_now, string datetime_now, string payload_hash,
+                           string content_type) {
 
 	HTTPHeaders res;
 	res["Host"] = host;
@@ -184,15 +183,47 @@ S3AuthParams AWSEnvironmentCredentialsProvider::CreateParams() {
 }
 
 S3AuthParams S3AuthParams::ReadFrom(optional_ptr<FileOpener> opener, FileOpenerInfo &info) {
-	auto result = S3AuthParams();
 
 	// Without a FileOpener we can not access settings nor secrets: return empty auth params
 	if (!opener) {
-		return result;
+		return {};
 	}
 
 	const char *secret_types[] = {"s3", "r2", "gcs", "aws"};
-	KeyValueSecretReader secret_reader(*opener, info, secret_types, 3);
+	S3KeyValueReader secret_reader(*opener, info, secret_types, 3);
+
+	return ReadFrom(secret_reader, info.file_path);
+}
+
+bool EndpointIsAWS(const string &endpoint) {
+	if (endpoint.empty()) {
+		// default (empty) endpoint is AWS
+		return true;
+	}
+	if (StringUtil::StartsWith(endpoint, "s3.") && StringUtil::EndsWith(endpoint, ".amazonaws.com")) {
+		return true;
+	}
+	return false;
+}
+
+void S3AuthParams::InitializeEndpoint() {
+	if (!EndpointIsAWS(endpoint)) {
+		return;
+	}
+	if (region.empty()) {
+		if (access_key_id.empty()) {
+			// no access key and no region - use legacy global endpoint
+			endpoint = "s3.amazonaws.com";
+			return;
+		}
+		// access key but no region - default to us-east-1
+		region = "us-east-1";
+	}
+	endpoint = StringUtil::Format("s3.%s.amazonaws.com", region);
+}
+
+S3AuthParams S3AuthParams::ReadFrom(S3KeyValueReader &secret_reader, const string &file_path) {
+	auto result = S3AuthParams();
 
 	// These settings we just set or leave to their S3AuthParams default value
 	secret_reader.TryGetSecretKeyOrSetting("region", "s3_region", result.region);
@@ -205,12 +236,11 @@ S3AuthParams S3AuthParams::ReadFrom(optional_ptr<FileOpener> opener, FileOpenerI
 	secret_reader.TryGetSecretKeyOrSetting("s3_url_compatibility_mode", "s3_url_compatibility_mode",
 	                                       result.s3_url_compatibility_mode);
 	secret_reader.TryGetSecretKeyOrSetting("requester_pays", "s3_requester_pays", result.requester_pays);
-
 	// Endpoint and url style are slightly more complex and require special handling for gcs and r2
 	auto endpoint_result = secret_reader.TryGetSecretKeyOrSetting("endpoint", "s3_endpoint", result.endpoint);
 	auto url_style_result = secret_reader.TryGetSecretKeyOrSetting("url_style", "s3_url_style", result.url_style);
 
-	if (StringUtil::StartsWith(info.file_path, "gcs://") || StringUtil::StartsWith(info.file_path, "gs://")) {
+	if (StringUtil::StartsWith(file_path, "gcs://") || StringUtil::StartsWith(file_path, "gs://")) {
 		// For GCS urls we force the endpoint and vhost path style, allowing only to be overridden by secrets
 		if (result.endpoint.empty() || endpoint_result.GetScope() != SettingScope::SECRET) {
 			result.endpoint = "storage.googleapis.com";
@@ -221,14 +251,14 @@ S3AuthParams S3AuthParams::ReadFrom(optional_ptr<FileOpener> opener, FileOpenerI
 		// Read bearer token for GCS
 		secret_reader.TryGetSecretKey("bearer_token", result.oauth2_bearer_token);
 	}
-
-	if (!result.region.empty() && (result.endpoint.empty() || result.endpoint == "s3.amazonaws.com")) {
-		result.endpoint = StringUtil::Format("s3.%s.amazonaws.com", result.region);
-	} else if (result.endpoint.empty()) {
-		result.endpoint = "s3.amazonaws.com";
-	}
+	result.InitializeEndpoint();
 
 	return result;
+}
+
+void S3AuthParams::SetRegion(string new_region) {
+	region = std::move(new_region);
+	InitializeEndpoint();
 }
 
 unique_ptr<KeyValueSecret> CreateSecret(vector<string> &prefix_paths_p, string &type, string &provider, string &name,
@@ -255,6 +285,26 @@ unique_ptr<KeyValueSecret> CreateSecret(vector<string> &prefix_paths_p, string &
 	}
 
 	return return_value;
+}
+
+S3FileHandle::S3FileHandle(FileSystem &fs, const OpenFileInfo &file, FileOpenFlags flags,
+                           unique_ptr<HTTPParams> http_params_p, const S3AuthParams &auth_params_p,
+                           const S3ConfigParams &config_params_p)
+    : HTTPFileHandle(fs, file, flags, std::move(http_params_p)), auth_params(auth_params_p),
+      config_params(config_params_p), uploads_in_progress(0), parts_uploaded(0), upload_finalized(false),
+      uploader_has_error(false), upload_exception(nullptr) {
+	auto_fallback_to_full_file_download = false;
+	if (flags.OpenForReading() && flags.OpenForWriting()) {
+		throw NotImplementedException("Cannot open an HTTP file for both reading and writing");
+	} else if (flags.OpenForAppending()) {
+		throw NotImplementedException("Cannot open an HTTP file for appending");
+	}
+	if (file.extended_info) {
+		auto entry = file.extended_info->options.find("s3_region");
+		if (entry != file.extended_info->options.end()) {
+			auth_params.SetRegion(entry->second.ToString());
+		}
+	}
 }
 
 S3FileHandle::~S3FileHandle() {
@@ -323,7 +373,7 @@ string S3FileSystem::InitializeMultipartUpload(S3FileHandle &file_handle) {
 	auto res = s3fs.PostRequest(file_handle, file_handle.path, {}, result, nullptr, 0, query_param);
 
 	if (res->status != HTTPStatusCode::OK_200) {
-		throw HTTPException(*res, "Unable to connect to URL %s: %s (HTTP code %d)", res->url, res->GetError(),
+		throw HTTPException(*res, "Unable to connect to URL %s: %s (HTTP code %d)", file_handle.path, res->GetError(),
 		                    static_cast<int>(res->status));
 	}
 
@@ -335,6 +385,8 @@ string S3FileSystem::InitializeMultipartUpload(S3FileHandle &file_handle) {
 	}
 
 	open_tag_pos += 10; // Skip open tag
+
+	file_handle.initialized_multipart_upload = true;
 
 	return result.substr(open_tag_pos, close_tag_pos - open_tag_pos);
 }
@@ -353,10 +405,22 @@ void S3FileSystem::NotifyUploadsInProgress(S3FileHandle &file_handle) {
 }
 
 void S3FileSystem::UploadBuffer(S3FileHandle &file_handle, shared_ptr<S3WriteBuffer> write_buffer) {
-	auto &s3fs = (S3FileSystem &)file_handle.file_system;
-
 	string query_param = "partNumber=" + to_string(write_buffer->part_no + 1) + "&" +
 	                     "uploadId=" + S3FileSystem::UrlEncode(file_handle.multipart_upload_id, true);
+
+	UploadBufferImplementation(file_handle, write_buffer, query_param, false);
+
+	NotifyUploadsInProgress(file_handle);
+}
+
+void S3FileSystem::UploadSingleBuffer(S3FileHandle &file_handle, shared_ptr<S3WriteBuffer> write_buffer) {
+	UploadBufferImplementation(file_handle, write_buffer, "", true);
+}
+
+void S3FileSystem::UploadBufferImplementation(S3FileHandle &file_handle, shared_ptr<S3WriteBuffer> write_buffer,
+                                              string query_param, bool single_upload) {
+	auto &s3fs = (S3FileSystem &)file_handle.file_system;
+
 	unique_ptr<HTTPResponse> res;
 	string etag;
 
@@ -365,8 +429,8 @@ void S3FileSystem::UploadBuffer(S3FileHandle &file_handle, shared_ptr<S3WriteBuf
 		                      query_param);
 
 		if (res->status != HTTPStatusCode::OK_200) {
-			throw HTTPException(*res, "Unable to connect to URL %s: %s (HTTP code %d)", res->url, res->GetError(),
-			                    static_cast<int>(res->status));
+			throw HTTPException(*res, "Unable to connect to URL %s: %s (HTTP code %d)", file_handle.path,
+			                    res->GetError(), static_cast<int>(res->status));
 		}
 
 		if (!res->headers.HasHeader("ETag")) {
@@ -374,6 +438,9 @@ void S3FileSystem::UploadBuffer(S3FileHandle &file_handle, shared_ptr<S3WriteBuf
 		}
 		etag = res->headers.GetHeaderValue("ETag");
 	} catch (std::exception &ex) {
+		if (single_upload) {
+			throw;
+		}
 		ErrorData error(ex);
 		if (error.Type() != ExceptionType::IO && error.Type() != ExceptionType::HTTP) {
 			throw;
@@ -385,6 +452,7 @@ void S3FileSystem::UploadBuffer(S3FileHandle &file_handle, shared_ptr<S3WriteBuf
 			file_handle.upload_exception = std::current_exception();
 		}
 
+		D_ASSERT(!single_upload); // If we are here we are in the multi-buffer situation
 		NotifyUploadsInProgress(file_handle);
 		return;
 	}
@@ -399,8 +467,6 @@ void S3FileSystem::UploadBuffer(S3FileHandle &file_handle, shared_ptr<S3WriteBuf
 
 	// Free up space for another thread to acquire an S3WriteBuffer
 	write_buffer.reset();
-
-	NotifyUploadsInProgress(file_handle);
 }
 
 void S3FileSystem::FlushBuffer(S3FileHandle &file_handle, shared_ptr<S3WriteBuffer> write_buffer) {
@@ -437,6 +503,9 @@ void S3FileSystem::FlushBuffer(S3FileHandle &file_handle, shared_ptr<S3WriteBuff
 #endif
 		file_handle.uploads_in_progress++;
 	}
+	if (file_handle.initialized_multipart_upload == false) {
+		file_handle.multipart_upload_id = InitializeMultipartUpload(file_handle);
+	}
 
 #ifdef SAME_THREAD_UPLOAD
 	UploadBuffer(file_handle, write_buffer);
@@ -459,6 +528,17 @@ void S3FileSystem::FlushAllBuffers(S3FileHandle &file_handle) {
 	}
 	file_handle.write_buffers_lock.unlock();
 
+	if (file_handle.initialized_multipart_upload == false) {
+		// TODO (carlo): unclear how to handle kms_key_id, but given currently they are custom, leave the multiupload
+		// codepath in that case
+		if (to_flush.size() == 1 && file_handle.auth_params.kms_key_id.empty()) {
+			UploadSingleBuffer(file_handle, to_flush[0]);
+			file_handle.upload_finalized = true;
+			return;
+		} else {
+			file_handle.multipart_upload_id = InitializeMultipartUpload(file_handle);
+		}
+	}
 	// Flush all buffers that aren't already uploading
 	for (auto &write_buffer : to_flush) {
 		if (!write_buffer->uploading) {
@@ -475,6 +555,10 @@ void S3FileSystem::FlushAllBuffers(S3FileHandle &file_handle) {
 
 void S3FileSystem::FinalizeMultipartUpload(S3FileHandle &file_handle) {
 	auto &s3fs = (S3FileSystem &)file_handle.file_system;
+	if (file_handle.upload_finalized) {
+		return;
+	}
+
 	file_handle.upload_finalized = true;
 
 	std::stringstream ss;
@@ -591,18 +675,25 @@ void S3FileSystem::ReadQueryParams(const string &url_query_param, S3AuthParams &
 	}
 }
 
-static string GetPrefix(string url) {
+string S3FileSystem::TryGetPrefix(const string &url) {
 	const string prefixes[] = {"s3://", "s3a://", "s3n://", "gcs://", "gs://", "r2://"};
 	for (auto &prefix : prefixes) {
-		if (StringUtil::StartsWith(url, prefix)) {
+		if (StringUtil::StartsWith(StringUtil::Lower(url), prefix)) {
 			return prefix;
 		}
 	}
-	throw IOException("URL needs to start with s3://, gcs:// or r2://");
-	return string();
+	return {};
 }
 
-ParsedS3Url S3FileSystem::S3UrlParse(string url, S3AuthParams &params) {
+string S3FileSystem::GetPrefix(const string &url) {
+	auto prefix = TryGetPrefix(url);
+	if (prefix.empty()) {
+		throw IOException("URL needs to start with s3://, gcs:// or r2://");
+	}
+	return prefix;
+}
+
+ParsedS3Url S3FileSystem::S3UrlParse(string url, const S3AuthParams &params) {
 	string http_proto, prefix, host, bucket, key, path, query_param, trimmed_s3_url;
 
 	prefix = GetPrefix(url);
@@ -708,8 +799,8 @@ unique_ptr<HTTPResponse> S3FileSystem::PostRequest(FileHandle &handle, string ur
 	} else {
 		// Use existing S3 authentication
 		auto payload_hash = GetPayloadHash(buffer_in, buffer_in_len);
-		headers = create_s3_header(parsed_s3_url.path, http_params, parsed_s3_url.host, "s3", "POST", auth_params, "",
-		                           "", payload_hash, "application/octet-stream");
+		headers = CreateS3Header(parsed_s3_url.path, http_params, parsed_s3_url.host, "s3", "POST", auth_params, "", "",
+		                         payload_hash, "application/octet-stream");
 	}
 
 	return HTTPFileSystem::PostRequest(handle, http_url, headers, result, buffer_in, buffer_in_len);
@@ -731,8 +822,8 @@ unique_ptr<HTTPResponse> S3FileSystem::PutRequest(FileHandle &handle, string url
 	} else {
 		// Use existing S3 authentication
 		auto payload_hash = GetPayloadHash(buffer_in, buffer_in_len);
-		headers = create_s3_header(parsed_s3_url.path, http_params, parsed_s3_url.host, "s3", "PUT", auth_params, "",
-		                           "", payload_hash, content_type);
+		headers = CreateS3Header(parsed_s3_url.path, http_params, parsed_s3_url.host, "s3", "PUT", auth_params, "", "",
+		                         payload_hash, content_type);
 	}
 
 	return HTTPFileSystem::PutRequest(handle, http_url, headers, buffer_in, buffer_in_len);
@@ -750,8 +841,7 @@ unique_ptr<HTTPResponse> S3FileSystem::HeadRequest(FileHandle &handle, string s3
 		headers["Host"] = parsed_s3_url.host;
 	} else {
 		// Use existing S3 authentication
-		headers =
-		    create_s3_header(parsed_s3_url.path, "", parsed_s3_url.host, "s3", "HEAD", auth_params, "", "", "", "");
+		headers = CreateS3Header(parsed_s3_url.path, "", parsed_s3_url.host, "s3", "HEAD", auth_params, "", "", "", "");
 	}
 
 	return HTTPFileSystem::HeadRequest(handle, http_url, headers);
@@ -769,8 +859,7 @@ unique_ptr<HTTPResponse> S3FileSystem::GetRequest(FileHandle &handle, string s3_
 		headers["Host"] = parsed_s3_url.host;
 	} else {
 		// Use existing S3 authentication
-		headers =
-		    create_s3_header(parsed_s3_url.path, "", parsed_s3_url.host, "s3", "GET", auth_params, "", "", "", "");
+		headers = CreateS3Header(parsed_s3_url.path, "", parsed_s3_url.host, "s3", "GET", auth_params, "", "", "", "");
 	}
 
 	return HTTPFileSystem::GetRequest(handle, http_url, headers);
@@ -789,8 +878,7 @@ unique_ptr<HTTPResponse> S3FileSystem::GetRangeRequest(FileHandle &handle, strin
 		headers["Host"] = parsed_s3_url.host;
 	} else {
 		// Use existing S3 authentication
-		headers =
-		    create_s3_header(parsed_s3_url.path, "", parsed_s3_url.host, "s3", "GET", auth_params, "", "", "", "");
+		headers = CreateS3Header(parsed_s3_url.path, "", parsed_s3_url.host, "s3", "GET", auth_params, "", "", "", "");
 	}
 
 	return HTTPFileSystem::GetRangeRequest(handle, http_url, headers, file_offset, buffer_out, buffer_out_len);
@@ -809,7 +897,7 @@ unique_ptr<HTTPResponse> S3FileSystem::DeleteRequest(FileHandle &handle, string 
 	} else {
 		// Use existing S3 authentication
 		headers =
-		    create_s3_header(parsed_s3_url.path, "", parsed_s3_url.host, "s3", "DELETE", auth_params, "", "", "", "");
+		    CreateS3Header(parsed_s3_url.path, "", parsed_s3_url.host, "s3", "DELETE", auth_params, "", "", "", "");
 	}
 
 	return HTTPFileSystem::DeleteRequest(handle, http_url, headers);
@@ -831,6 +919,22 @@ unique_ptr<HTTPFileHandle> S3FileSystem::CreateHandle(const OpenFileInfo &file, 
 	                                       S3ConfigParams::ReadFrom(opener));
 }
 
+void S3FileHandle::InitializeFromCacheEntry(const HTTPMetadataCacheEntry &cache_entry) {
+	HTTPFileHandle::InitializeFromCacheEntry(cache_entry);
+	auto entry = cache_entry.properties.find("s3_region");
+	if (entry != cache_entry.properties.end()) {
+		auth_params.SetRegion(entry->second);
+	}
+}
+
+HTTPMetadataCacheEntry S3FileHandle::GetCacheEntry() const {
+	auto result = HTTPFileHandle::GetCacheEntry();
+	if (!auth_params.region.empty()) {
+		result.properties["s3_region"] = auth_params.region;
+	}
+	return result;
+}
+
 void S3FileHandle::Initialize(optional_ptr<FileOpener> opener) {
 	try {
 		HTTPFileHandle::Initialize(opener);
@@ -838,6 +942,7 @@ void S3FileHandle::Initialize(optional_ptr<FileOpener> opener) {
 		ErrorData error(ex);
 		bool refreshed_secret = false;
 		if (error.Type() == ExceptionType::IO || error.Type() == ExceptionType::HTTP) {
+			// legacy endpoint (no region) returns 400
 			auto context = opener->TryGetClientContext();
 			if (context) {
 				auto transaction = CatalogTransaction::GetSystemCatalogTransaction(*context);
@@ -849,14 +954,16 @@ void S3FileHandle::Initialize(optional_ptr<FileOpener> opener) {
 				}
 			}
 		}
+		string correct_region;
 		if (!refreshed_secret) {
 			auto &extra_info = error.ExtraInfo();
 			auto entry = extra_info.find("status_code");
 			if (entry != extra_info.end()) {
-				if (entry->second == "400") {
-					// 400: BAD REQUEST
-					auto extra_text = S3FileSystem::GetS3BadRequestError(auth_params);
-					throw Exception(error.Type(), error.RawMessage() + extra_text, extra_info);
+				if (entry->second == "301" || entry->second == "400") {
+					auto new_region = extra_info.find("header_x-amz-bucket-region");
+					if (new_region != extra_info.end()) {
+						correct_region = new_region->second;
+					}
 				}
 				if (entry->second == "403") {
 					// 403: FORBIDDEN
@@ -866,18 +973,26 @@ void S3FileHandle::Initialize(optional_ptr<FileOpener> opener) {
 					} else {
 						extra_text = S3FileSystem::GetS3AuthError(auth_params);
 					}
-					throw Exception(error.Type(), error.RawMessage() + extra_text, extra_info);
+					throw Exception(extra_info, error.Type(), error.RawMessage() + extra_text);
 				}
 			}
-			throw;
+			if (correct_region.empty()) {
+				throw;
+			}
 		}
 		// We have succesfully refreshed a secret: retry initializing with new credentials
 		FileOpenerInfo info = {path};
 		auth_params = S3AuthParams::ReadFrom(opener, info);
+		if (!correct_region.empty()) {
+			DUCKDB_LOG_WARNING(
+			    logger,
+			    "Read S3 file \"%s\" from incorrect region \"%s\" - retrying with updated region \"%s\".\n"
+			    "Consider setting the S3 region to this explicitly to avoid extra round-trips.",
+			    path, auth_params.region, correct_region);
+			auth_params.SetRegion(std::move(correct_region));
+		}
 		HTTPFileHandle::Initialize(opener);
 	}
-
-	auto &s3fs = file_system.Cast<S3FileSystem>();
 
 	if (flags.OpenForWriting()) {
 		auto aws_minimum_part_size = 5242880; // 5 MiB https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html
@@ -889,8 +1004,6 @@ void S3FileHandle::Initialize(optional_ptr<FileOpener> opener) {
 		part_size = ((minimum_part_size + Storage::DEFAULT_BLOCK_SIZE - 1) / Storage::DEFAULT_BLOCK_SIZE) *
 		            Storage::DEFAULT_BLOCK_SIZE;
 		D_ASSERT(part_size * max_part_count >= config_params.max_file_size);
-
-		multipart_upload_id = s3fs.InitializeMultipartUpload(*this);
 	}
 }
 
@@ -904,13 +1017,13 @@ bool S3FileSystem::CanHandleFile(const string &fpath) {
 void S3FileSystem::RemoveFile(const string &path, optional_ptr<FileOpener> opener) {
 	auto handle = OpenFile(path, FileFlags::FILE_FLAGS_NULL_IF_NOT_EXISTS, opener);
 	if (!handle) {
-		throw IOException("Could not remove file \"%s\": %s", {{"errno", "404"}}, path, "No such file or directory");
+		throw IOException({{"errno", "404"}}, "Could not remove file \"%s\": %s", path, "No such file or directory");
 	}
 
 	auto &s3fh = handle->Cast<S3FileHandle>();
 	auto res = DeleteRequest(*handle, s3fh.path, {});
 	if (res->status != HTTPStatusCode::OK_200 && res->status != HTTPStatusCode::NoContent_204) {
-		throw IOException("Could not remove file \"%s\": %s", {{"errno", to_string(static_cast<int>(res->status))}},
+		throw IOException({{"errno", to_string(static_cast<int>(res->status))}}, "Could not remove file \"%s\": %s",
 		                  path, res->GetError());
 	}
 }
@@ -971,6 +1084,7 @@ void S3FileSystem::Write(FileHandle &handle, void *buffer, int64_t nr_bytes, idx
 			FlushBuffer(s3fh, write_buffer);
 		}
 		s3fh.file_offset += bytes_to_write;
+		s3fh.length += bytes_to_write;
 		bytes_written += bytes_to_write;
 	}
 
@@ -1002,71 +1116,116 @@ static bool Match(vector<string>::const_iterator key, vector<string>::const_iter
 	return key == key_end && pattern == pattern_end;
 }
 
-vector<OpenFileInfo> S3FileSystem::Glob(const string &glob_pattern, FileOpener *opener) {
-	if (opener == nullptr) {
+struct S3GlobResult : public LazyMultiFileList {
+public:
+	S3GlobResult(S3FileSystem &fs, const string &path, optional_ptr<FileOpener> opener);
+
+protected:
+	bool ExpandNextPath() const override;
+
+private:
+	string glob_pattern;
+	optional_ptr<FileOpener> opener;
+	mutable bool finished = false;
+	mutable S3AuthParams s3_auth_params;
+	string shared_path;
+	ParsedS3Url parsed_s3_url;
+	mutable string main_continuation_token;
+	mutable string current_common_prefix;
+	mutable string common_prefix_continuation_token;
+	mutable vector<string> common_prefixes;
+};
+
+S3GlobResult::S3GlobResult(S3FileSystem &fs, const string &glob_pattern_p, optional_ptr<FileOpener> opener)
+    : glob_pattern(glob_pattern_p), opener(opener) {
+	if (!opener) {
 		throw InternalException("Cannot S3 Glob without FileOpener");
 	}
-
 	FileOpenerInfo info = {glob_pattern};
 
 	// Trim any query parameters from the string
-	S3AuthParams s3_auth_params = S3AuthParams::ReadFrom(opener, info);
+	s3_auth_params = S3AuthParams::ReadFrom(opener, info);
 
 	// In url compatibility mode, we ignore globs allowing users to query files with the glob chars
 	if (s3_auth_params.s3_url_compatibility_mode) {
-		return {glob_pattern};
+		expanded_files.emplace_back(glob_pattern);
+		finished = true;
+		return;
 	}
 
-	auto parsed_s3_url = S3UrlParse(glob_pattern, s3_auth_params);
+	parsed_s3_url = fs.S3UrlParse(glob_pattern, s3_auth_params);
 	auto parsed_glob_url = parsed_s3_url.trimmed_s3_url;
 
 	// AWS matches on prefix, not glob pattern, so we take a substring until the first wildcard char for the aws calls
 	auto first_wildcard_pos = parsed_glob_url.find_first_of("*[\\");
 	if (first_wildcard_pos == string::npos) {
-		return {glob_pattern};
+		expanded_files.emplace_back(glob_pattern);
+		finished = true;
+		return;
 	}
 
-	string shared_path = parsed_glob_url.substr(0, first_wildcard_pos);
+	shared_path = parsed_glob_url.substr(0, first_wildcard_pos);
+
+	fs.ReadQueryParams(parsed_s3_url.query_param, s3_auth_params);
+}
+
+bool S3GlobResult::ExpandNextPath() const {
+	if (finished) {
+		return false;
+	}
+
+	FileOpenerInfo info = {glob_pattern};
 	auto http_util = HTTPFSUtil::GetHTTPUtil(opener);
 	auto http_params = http_util->InitializeParameters(opener, info);
 
-	ReadQueryParams(parsed_s3_url.query_param, s3_auth_params);
-
-	// Do main listobjectsv2 request
 	vector<OpenFileInfo> s3_keys;
-	string main_continuation_token;
+	if (!current_common_prefix.empty()) {
+		// we have common prefixes left to scan - perform the request
+		auto prefix_path = parsed_s3_url.prefix + parsed_s3_url.bucket + '/' + current_common_prefix;
 
-	// Main paging loop
-	do {
-		// main listobject call, may
-		string response_str = AWSListObjectV2::Request(shared_path, *http_params, s3_auth_params,
-		                                               main_continuation_token, HTTPState::TryGetState(opener).get());
+		auto prefix_res =
+		    AWSListObjectV2::Request(prefix_path, *http_params, s3_auth_params, common_prefix_continuation_token);
+		AWSListObjectV2::ParseFileList(prefix_res, s3_keys);
+		auto more_prefixes = AWSListObjectV2::ParseCommonPrefix(prefix_res);
+		common_prefixes.insert(common_prefixes.end(), more_prefixes.begin(), more_prefixes.end());
+		common_prefix_continuation_token = AWSListObjectV2::ParseContinuationToken(prefix_res);
+		if (common_prefix_continuation_token.empty()) {
+			// we are done with the current common prefix
+			// either move on to the next one, or finish up
+			if (common_prefixes.empty()) {
+				// done - we need to do a top-level request again next
+				current_common_prefix = string();
+			} else {
+				// process the next prefix
+				current_common_prefix = common_prefixes.back();
+				common_prefixes.pop_back();
+			}
+		}
+	} else {
+		if (!common_prefixes.empty()) {
+			throw InternalException("We have common prefixes but we are doing a top-level request");
+		}
+		// issue the main request
+		string response_str =
+		    AWSListObjectV2::Request(shared_path, *http_params, s3_auth_params, main_continuation_token);
 		main_continuation_token = AWSListObjectV2::ParseContinuationToken(response_str);
 		AWSListObjectV2::ParseFileList(response_str, s3_keys);
 
-		// Repeat requests until the keys of all common prefixes are parsed.
-		auto common_prefixes = AWSListObjectV2::ParseCommonPrefix(response_str);
-		while (!common_prefixes.empty()) {
-			auto prefix_path = parsed_s3_url.prefix + parsed_s3_url.bucket + '/' + common_prefixes.back();
+		// parse the list of common prefixes
+		common_prefixes = AWSListObjectV2::ParseCommonPrefix(response_str);
+		if (!common_prefixes.empty()) {
+			// we have common prefixes - set one up for the next request
+			current_common_prefix = common_prefixes.back();
 			common_prefixes.pop_back();
-
-			// TODO we could optimize here by doing a match on the prefix, if it doesn't match we can skip this prefix
-			// Paging loop for common prefix requests
-			string common_prefix_continuation_token;
-			do {
-				auto prefix_res =
-				    AWSListObjectV2::Request(prefix_path, *http_params, s3_auth_params,
-				                             common_prefix_continuation_token, HTTPState::TryGetState(opener).get());
-				AWSListObjectV2::ParseFileList(prefix_res, s3_keys);
-				auto more_prefixes = AWSListObjectV2::ParseCommonPrefix(prefix_res);
-				common_prefixes.insert(common_prefixes.end(), more_prefixes.begin(), more_prefixes.end());
-				common_prefix_continuation_token = AWSListObjectV2::ParseContinuationToken(prefix_res);
-			} while (!common_prefix_continuation_token.empty());
 		}
-	} while (!main_continuation_token.empty());
+	}
+
+	if (main_continuation_token.empty() && current_common_prefix.empty()) {
+		// we are done
+		finished = true;
+	}
 
 	vector<string> pattern_splits = StringUtil::Split(parsed_s3_url.key, "/");
-	vector<OpenFileInfo> result;
 	for (auto &s3_key : s3_keys) {
 
 		vector<string> key_splits = StringUtil::Split(s3_key.path, "/");
@@ -1079,145 +1238,47 @@ vector<OpenFileInfo> S3FileSystem::Glob(const string &glob_pattern, FileOpener *
 				result_full_url += '?' + parsed_s3_url.query_param;
 			}
 			s3_key.path = std::move(result_full_url);
-			result.push_back(std::move(s3_key));
+			if (!s3_auth_params.region.empty()) {
+				s3_key.extended_info->options["s3_region"] = s3_auth_params.region;
+			}
+			expanded_files.push_back(std::move(s3_key));
 		}
 	}
-	return result;
+	return true;
+}
+
+unique_ptr<MultiFileList> S3FileSystem::GlobFilesExtended(const string &path, const FileGlobInput &input,
+                                                          optional_ptr<FileOpener> opener) {
+	return make_uniq<S3GlobResult>(*this, path, opener);
 }
 
 string S3FileSystem::GetName() const {
 	return "S3FileSystem";
 }
 
-bool S3FileSystem::ListFiles(const string &directory, const std::function<void(const string &, bool)> &callback,
-                             FileOpener *opener) {
+bool S3FileSystem::ListFilesExtended(const string &directory, const std::function<void(OpenFileInfo &info)> &callback,
+                                     optional_ptr<FileOpener> opener) {
 	string trimmed_dir = directory;
-	StringUtil::RTrim(trimmed_dir, PathSeparator(trimmed_dir));
-	auto glob_res = Glob(JoinPath(trimmed_dir, "**"), opener);
+	auto sep = PathSeparator(trimmed_dir);
+	StringUtil::RTrim(trimmed_dir, sep);
+	auto glob_res = GlobFilesExtended(JoinPath(trimmed_dir, "**"), FileGlobOptions::ALLOW_EMPTY, opener);
 
-	if (glob_res.empty()) {
+	if (!glob_res || glob_res->GetExpandResult() == FileExpandResult::NO_FILES) {
 		return false;
 	}
+	auto base_path = trimmed_dir + sep;
 
-	for (const auto &file : glob_res) {
-		callback(file.path, false);
+	for (auto file : glob_res->Files()) {
+		if (!StringUtil::StartsWith(file.path, base_path)) {
+			throw InvalidInputException(
+			    "Globbed directory \"%s\", but found file \"%s\" that does not start with base path \"%s\"", directory,
+			    file.path, base_path);
+		}
+		file.path = file.path.substr(base_path.size());
+		callback(file);
 	}
 
 	return true;
-}
-
-string S3FileSystem::GetS3BadRequestError(S3AuthParams &s3_auth_params) {
-	string extra_text = "\n\nBad Request - this can be caused by the S3 region being set incorrectly.";
-	if (s3_auth_params.region.empty()) {
-		extra_text += "\n* No region is provided.";
-	} else {
-		extra_text += "\n* Provided region is \"" + s3_auth_params.region + "\"";
-	}
-	return extra_text;
-}
-
-string S3FileSystem::GetS3AuthError(S3AuthParams &s3_auth_params) {
-	string extra_text = "\n\nAuthentication Failure - this is usually caused by invalid or missing credentials.";
-	if (s3_auth_params.secret_access_key.empty() && s3_auth_params.access_key_id.empty()) {
-		extra_text += "\n* No credentials are provided.";
-	} else {
-		extra_text += "\n* Credentials are provided, but they did not work.";
-	}
-	extra_text += "\n* See https://duckdb.org/docs/stable/extensions/httpfs/s3api.html";
-	return extra_text;
-}
-
-string S3FileSystem::GetGCSAuthError(S3AuthParams &s3_auth_params) {
-	string extra_text = "\n\nAuthentication Failure - GCS authentication failed.";
-	if (s3_auth_params.oauth2_bearer_token.empty() && s3_auth_params.secret_access_key.empty() &&
-	    s3_auth_params.access_key_id.empty()) {
-		extra_text += "\n* No credentials provided.";
-		extra_text += "\n* For OAuth2: CREATE SECRET (TYPE GCS, bearer_token 'your-token')";
-		extra_text += "\n* For HMAC: CREATE SECRET (TYPE GCS, key_id 'key', secret 'secret')";
-	} else if (!s3_auth_params.oauth2_bearer_token.empty()) {
-		extra_text += "\n* Bearer token was provided but authentication failed.";
-		extra_text += "\n* Ensure your OAuth2 token is valid and not expired.";
-	} else {
-		extra_text += "\n* HMAC credentials were provided but authentication failed.";
-		extra_text += "\n* Ensure your HMAC key_id and secret are correct.";
-	}
-	return extra_text;
-}
-
-HTTPException S3FileSystem::GetS3Error(S3AuthParams &s3_auth_params, const HTTPResponse &response, const string &url) {
-	string extra_text;
-	if (response.status == HTTPStatusCode::BadRequest_400) {
-		extra_text = GetS3BadRequestError(s3_auth_params);
-	}
-	if (response.status == HTTPStatusCode::Forbidden_403) {
-		extra_text = GetS3AuthError(s3_auth_params);
-	}
-	auto status_message = HTTPFSUtil::GetStatusMessage(response.status);
-	throw HTTPException(response, "HTTP GET error reading '%s' in region '%s' (HTTP %d %s)%s", url,
-	                    s3_auth_params.region, response.status, status_message, extra_text);
-}
-
-HTTPException S3FileSystem::GetHTTPError(FileHandle &handle, const HTTPResponse &response, const string &url) {
-	auto &s3_handle = handle.Cast<S3FileHandle>();
-
-	// Use GCS-specific error for GCS URLs
-	if (IsGCSRequest(url) && response.status == HTTPStatusCode::Forbidden_403) {
-		string extra_text = GetGCSAuthError(s3_handle.auth_params);
-		auto status_message = HTTPFSUtil::GetStatusMessage(response.status);
-		throw HTTPException(response, "HTTP error on '%s' (HTTP %d %s)%s", url, response.status, status_message,
-		                    extra_text);
-	}
-
-	return GetS3Error(s3_handle.auth_params, response, url);
-}
-string AWSListObjectV2::Request(string &path, HTTPParams &http_params, S3AuthParams &s3_auth_params,
-                                string &continuation_token, optional_ptr<HTTPState> state, bool use_delimiter) {
-	auto parsed_url = S3FileSystem::S3UrlParse(path, s3_auth_params);
-
-	// Construct the ListObjectsV2 call
-	string req_path = parsed_url.path.substr(0, parsed_url.path.length() - parsed_url.key.length());
-
-	string req_params;
-	if (!continuation_token.empty()) {
-		req_params += "continuation-token=" + S3FileSystem::UrlEncode(continuation_token, true);
-		req_params += "&";
-	}
-	req_params += "encoding-type=url&list-type=2";
-	req_params += "&prefix=" + S3FileSystem::UrlEncode(parsed_url.key, true);
-
-	if (use_delimiter) {
-		req_params += "&delimiter=%2F";
-	}
-
-	string listobjectv2_url = req_path + "?" + req_params;
-
-	auto header_map =
-	    create_s3_header(req_path, req_params, parsed_url.host, "s3", "GET", s3_auth_params, "", "", "", "");
-
-	// Get requests use fresh connection
-	string full_host = parsed_url.http_proto + parsed_url.host;
-	std::stringstream response;
-	GetRequestInfo get_request(
-	    full_host, listobjectv2_url, header_map, http_params,
-	    [&](const HTTPResponse &response) {
-		    if (static_cast<int>(response.status) >= 400) {
-			    string trimmed_path = path;
-			    StringUtil::RTrim(trimmed_path, "/");
-			    trimmed_path += listobjectv2_url;
-			    throw S3FileSystem::GetS3Error(s3_auth_params, response, trimmed_path);
-		    }
-		    return true;
-	    },
-	    [&](const_data_ptr_t data, idx_t data_length) {
-		    response << string(const_char_ptr_cast(data), data_length);
-		    return true;
-	    });
-	auto result = http_params.http_util.Request(get_request);
-	if (result->HasRequestError()) {
-		throw IOException("%s error for HTTP GET to '%s'", result->GetRequestError(), listobjectv2_url);
-	}
-
-	return response.str();
 }
 
 optional_idx FindTagContents(const string &response, const string &tag, idx_t cur_pos, string &result) {
@@ -1235,6 +1296,210 @@ optional_idx FindTagContents(const string &response, const string &tag, idx_t cu
 	}
 	result = response.substr(open_tag_pos + open_tag.size(), close_tag_pos - open_tag_pos - open_tag.size());
 	return close_tag_pos + close_tag.size();
+}
+
+string S3FileSystem::GetS3BadRequestError(const S3AuthParams &s3_auth_params, string correct_region) {
+	string extra_text = "\n\nBad Request - this can be caused by the S3 region being set incorrectly.";
+	if (s3_auth_params.region.empty()) {
+		extra_text += "\n* No region is provided.";
+	} else {
+		extra_text += "\n* Provided region is: \"" + s3_auth_params.region + "\"";
+	}
+	if (!correct_region.empty()) {
+		extra_text += "\n* Correct region is: \"" + correct_region + "\"";
+	}
+	return extra_text;
+}
+
+string S3FileSystem::GetS3AuthError(const S3AuthParams &s3_auth_params) {
+	string extra_text = "\n\nAuthentication Failure - this is usually caused by invalid or missing credentials.";
+	if (s3_auth_params.secret_access_key.empty() && s3_auth_params.access_key_id.empty()) {
+		extra_text += "\n* No credentials are provided.";
+	} else {
+		extra_text += "\n* Credentials are provided, but they did not work.";
+	}
+	extra_text += "\n* See https://duckdb.org/docs/stable/extensions/httpfs/s3api.html";
+	return extra_text;
+}
+
+string S3FileSystem::GetGCSAuthError(const S3AuthParams &s3_auth_params) {
+	string extra_text = "\n\nAuthentication Failure - GCS authentication failed.";
+	if (s3_auth_params.oauth2_bearer_token.empty() && s3_auth_params.secret_access_key.empty() &&
+	    s3_auth_params.access_key_id.empty()) {
+		extra_text += "\n* No credentials provided.";
+		extra_text += "\n* For OAuth2: CREATE SECRET (TYPE GCS, bearer_token 'your-token')";
+		extra_text += "\n* For HMAC: CREATE SECRET (TYPE GCS, key_id 'key', secret 'secret')";
+	} else if (!s3_auth_params.oauth2_bearer_token.empty()) {
+		extra_text += "\n* Bearer token was provided but authentication failed.";
+		extra_text += "\n* Ensure your OAuth2 token is valid and not expired.";
+	} else {
+		extra_text += "\n* HMAC credentials were provided but authentication failed.";
+		extra_text += "\n* Ensure your HMAC key_id and secret are correct.";
+	}
+	return extra_text;
+}
+
+string S3FileSystem::ParseS3Error(const string &error) {
+	// S3 errors look like this:
+	//<Error>
+	//  <Code>NoSuchKey</Code>
+	//  <Message>The resource you requested does not exist</Message>
+	//  <Resource>/mybucket/myfoto.jpg</Resource>
+	//  <RequestId>4442587FB7D0A2F9</RequestId>
+	//</Error>
+	if (error.empty()) {
+		return string();
+	}
+	// find <Error> tag
+	string error_xml;
+	idx_t err_pos = 0;
+	auto next_pos = FindTagContents(error, "Error", err_pos, error_xml);
+	if (!next_pos.IsValid()) {
+		return string();
+	}
+	// find <Code> and <Message>
+	string error_code, error_message, extra_error_data;
+	idx_t cur_pos = 0;
+	next_pos = FindTagContents(error_xml, "Code", cur_pos, error_code);
+	if (!next_pos.IsValid()) {
+		return string();
+	}
+	cur_pos = 0;
+	next_pos = FindTagContents(error_xml, "Message", cur_pos, error_message);
+	if (!next_pos.IsValid()) {
+		return string();
+	}
+	// depending on Code, find other info
+	if (error_code == "InvalidAccessKeyId") {
+		cur_pos = 0;
+		next_pos = FindTagContents(error_xml, "AWSAccessKeyId", cur_pos, extra_error_data);
+		if (next_pos.IsValid()) {
+			extra_error_data = "\nInvalid Access Key: \"" + extra_error_data + "\"";
+		}
+	}
+	return StringUtil::Format("\n\n%s: %s%s", error_code, error_message, extra_error_data);
+}
+
+HTTPException S3FileSystem::GetS3Error(const S3AuthParams &s3_auth_params, const HTTPResponse &response,
+                                       const string &url) {
+	string extra_text = ParseS3Error(response.body);
+	if (response.status == HTTPStatusCode::BadRequest_400) {
+		extra_text += GetS3BadRequestError(s3_auth_params);
+	}
+	if (response.status == HTTPStatusCode::Forbidden_403) {
+		extra_text += GetS3AuthError(s3_auth_params);
+	}
+	auto status_message = HTTPFSUtil::GetStatusMessage(response.status);
+	return HTTPException(response, "HTTP GET error reading '%s' in region '%s' (HTTP %d %s)%s", url,
+	                     s3_auth_params.region, response.status, status_message, extra_text);
+}
+
+HTTPException S3FileSystem::GetHTTPError(FileHandle &handle, const HTTPResponse &response, const string &url) {
+	auto &s3_handle = handle.Cast<S3FileHandle>();
+
+	// Use GCS-specific error for GCS URLs
+	if (IsGCSRequest(url) && response.status == HTTPStatusCode::Forbidden_403) {
+		string extra_text = GetGCSAuthError(s3_handle.auth_params);
+		auto status_message = HTTPFSUtil::GetStatusMessage(response.status);
+		throw HTTPException(response, "HTTP error on '%s' (HTTP %d %s)%s", url, response.status, status_message,
+		                    extra_text);
+	}
+
+	return GetS3Error(s3_handle.auth_params, response, url);
+}
+
+string AWSListObjectV2::Request(const string &path, HTTPParams &http_params, S3AuthParams &s3_auth_params,
+                                string &continuation_token, optional_idx max_keys) {
+	const idx_t MAX_RETRIES = 1;
+	for (idx_t it = 0; it <= MAX_RETRIES; it++) {
+		auto parsed_url = S3FileSystem::S3UrlParse(path, s3_auth_params);
+
+		// Construct the ListObjectsV2 call
+		string req_path = parsed_url.path.substr(0, parsed_url.path.length() - parsed_url.key.length());
+
+		string req_params;
+		if (!continuation_token.empty()) {
+			req_params += "continuation-token=" + S3FileSystem::UrlEncode(continuation_token, true);
+			req_params += "&";
+		}
+		req_params += "encoding-type=url&list-type=2";
+		req_params += "&prefix=" + S3FileSystem::UrlEncode(parsed_url.key, true);
+		if (max_keys.IsValid()) {
+			req_params += "&max-keys=" + to_string(max_keys.GetIndex());
+		}
+
+		auto header_map =
+		    CreateS3Header(req_path, req_params, parsed_url.host, "s3", "GET", s3_auth_params, "", "", "", "");
+
+		// Get requests use fresh connection
+		string full_host = parsed_url.http_proto + parsed_url.host;
+		string listobjectv2_url = full_host + req_path + "?" + req_params;
+		std::stringstream response;
+		ErrorData error;
+		GetRequestInfo get_request(
+		    full_host, listobjectv2_url, header_map, http_params,
+		    [&](const HTTPResponse &response) {
+			    if (static_cast<int>(response.status) >= 400) {
+				    string trimmed_path = path;
+				    StringUtil::RTrim(trimmed_path, "/");
+				    error = ErrorData(S3FileSystem::GetS3Error(s3_auth_params, response, trimmed_path));
+			    }
+			    return true;
+		    },
+		    [&](const_data_ptr_t data, idx_t data_length) {
+			    response << string(const_char_ptr_cast(data), data_length);
+			    return true;
+		    });
+		auto result = http_params.http_util.Request(get_request);
+		if (result->HasRequestError()) {
+			throw IOException("%s error for HTTP GET to '%s'", result->GetRequestError(), listobjectv2_url);
+		}
+		// check
+		string updated_bucket_region;
+		if (result->status == HTTPStatusCode::MovedPermanently_301) {
+			string moved_error;
+			if (it == 0 && result->HasHeader("x-amz-bucket-region")) {
+				auto response_region = result->GetHeaderValue("x-amz-bucket-region");
+				if (response_region == s3_auth_params.region) {
+					moved_error = "suggested region \"" + response_region +
+					              "\" is the same as the region we used to make the request";
+				} else {
+					updated_bucket_region = response_region;
+				}
+			} else {
+				moved_error = "HTTP response did not contain header_x-amz-bucket-region";
+			}
+			if (!moved_error.empty()) {
+				throw HTTPException(*result, "HTTP 301 response when running glob \"%s\" but %s", path, moved_error);
+			}
+		}
+		if (error.HasError()) {
+			if (it == 0 && result->HasHeader("x-amz-bucket-region")) {
+				auto response_region = result->GetHeaderValue("x-amz-bucket-region");
+				if (response_region != s3_auth_params.region) {
+					updated_bucket_region = response_region;
+				}
+			}
+			if (updated_bucket_region.empty()) {
+				// no updated region found
+				error.Throw();
+			}
+		}
+		if (!updated_bucket_region.empty()) {
+			DUCKDB_LOG_WARNING(
+			    http_params.logger,
+			    "Ran S3 glob \"%s\" from incorrect region \"%s\" - retrying with updated region \"%s\".\n"
+			    "Consider setting the S3 region to this explicitly to avoid extra round-trips.",
+			    path, s3_auth_params.region, updated_bucket_region);
+
+			// bucket region was updated - update and re-run the request against the correct endpoint
+			s3_auth_params.SetRegion(std::move(updated_bucket_region));
+			continue;
+		}
+		return response.str();
+	}
+	throw InvalidInputException(
+	    "Exceeded retry count in AWSListObjectV2::Request - this means we got multiple redirects to different regions");
 }
 
 void AWSListObjectV2::ParseFileList(string &aws_response, vector<OpenFileInfo> &result) {
@@ -1329,6 +1594,15 @@ vector<string> AWSListObjectV2::ParseCommonPrefix(string &aws_response) {
 		}
 	}
 	return s3_prefixes;
+}
+
+S3KeyValueReader::S3KeyValueReader(FileOpener &opener_p, optional_ptr<FileOpenerInfo> info, const char **secret_types,
+                                   idx_t secret_types_len)
+    : reader(opener_p, info, secret_types, secret_types_len) {
+	Value use_env_vars_for_secret_info_setting;
+	reader.TryGetSecretKeyOrSetting("enable_global_s3_configuration", "enable_global_s3_configuration",
+	                                use_env_vars_for_secret_info_setting);
+	use_env_variables_for_secret_settings = use_env_vars_for_secret_info_setting.GetValue<bool>();
 }
 
 } // namespace duckdb
