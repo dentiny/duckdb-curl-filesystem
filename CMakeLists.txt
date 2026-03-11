@@ -59,11 +59,11 @@ add_executable(test_thread_pool unit/test_thread_pool.cpp)
 target_link_libraries(test_thread_pool ${EXTENSION_NAME})
 
 add_executable(multi_curl_manager_test integration/multi_curl_manager_test.cpp)
-target_link_libraries(multi_curl_manager_test ${EXTENSION_NAME})
+target_link_libraries(multi_curl_manager_test ${EXTENSION_NAME} dummy_static_extension_loader)
 
 add_executable(http_filesystem_test integration/http_filesystem_test.cpp)
-target_link_libraries(http_filesystem_test ${EXTENSION_NAME})
+target_link_libraries(http_filesystem_test ${EXTENSION_NAME} dummy_static_extension_loader)
 
 # Benchmark
 add_executable(multicurl_benchmark benchmark/multicurl_benchmark.cpp)
-target_link_libraries(multicurl_benchmark ${EXTENSION_NAME})
+target_link_libraries(multicurl_benchmark ${EXTENSION_NAME} dummy_static_extension_loader)
