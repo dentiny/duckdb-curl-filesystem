@@ -146,7 +146,6 @@ size_t AESStateSSL::Process(const_data_ptr_t in, idx_t in_len, data_ptr_t out, i
 	case EncryptionTypes::DECRYPT:
 		if (1 != EVP_DecryptUpdate(context, data_ptr_cast(out), reinterpret_cast<int *>(&out_len),
 		                           const_data_ptr_cast(in), (int)in_len)) {
-
 			throw InternalException("DecryptUpdate failed");
 		}
 		break;
@@ -196,14 +195,12 @@ size_t AESStateSSL::FinalizeGCM(data_ptr_t out, idx_t out_len, data_ptr_t tag, i
 }
 
 size_t AESStateSSL::Finalize(data_ptr_t out, idx_t out_len, data_ptr_t tag, idx_t tag_len) {
-
 	if (metadata->GetCipher() == EncryptionTypes::GCM) {
 		return FinalizeGCM(out, out_len, tag, tag_len);
 	}
 
 	auto text_len = out_len;
 	switch (mode) {
-
 	case EncryptionTypes::ENCRYPT: {
 		if (1 != EVP_EncryptFinal_ex(context, data_ptr_cast(out) + out_len, reinterpret_cast<int *>(&out_len))) {
 			throw InternalException("EncryptFinal failed");

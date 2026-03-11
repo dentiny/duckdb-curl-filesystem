@@ -31,7 +31,6 @@ namespace duckdb {
 static HTTPHeaders create_s3_header(string url, string query, string host, string service, string method,
                                     const S3AuthParams &auth_params, string date_now = "", string datetime_now = "",
                                     string payload_hash = "", string content_type = "") {
-
 	HTTPHeaders res;
 	res["Host"] = host;
 	// If access key is not set, we don't set the headers at all to allow accessing public files through s3 urls
@@ -895,7 +894,6 @@ void S3FileHandle::Initialize(optional_ptr<FileOpener> opener) {
 }
 
 bool S3FileSystem::CanHandleFile(const string &fpath) {
-
 	return fpath.rfind("s3://", 0) * fpath.rfind("s3a://", 0) * fpath.rfind("s3n://", 0) * fpath.rfind("gcs://", 0) *
 	           fpath.rfind("gs://", 0) * fpath.rfind("r2://", 0) ==
 	       0;
@@ -905,7 +903,7 @@ void S3FileSystem::RemoveFile(const string &path, optional_ptr<FileOpener> opene
 	auto handle = OpenFile(path, FileFlags::FILE_FLAGS_NULL_IF_NOT_EXISTS, opener);
 	if (!handle) {
 		throw IOException({{"errno", "404"}}, Exception::ConstructMessage("Could not remove file \"%s\": %s", path,
-		                                                                   "No such file or directory"));
+		                                                                  "No such file or directory"));
 	}
 
 	auto &s3fh = handle->Cast<S3FileHandle>();
@@ -980,7 +978,6 @@ void S3FileSystem::Write(FileHandle &handle, void *buffer, int64_t nr_bytes, idx
 
 static bool Match(vector<string>::const_iterator key, vector<string>::const_iterator key_end,
                   vector<string>::const_iterator pattern, vector<string>::const_iterator pattern_end) {
-
 	while (key != key_end && pattern != pattern_end) {
 		if (*pattern == "**") {
 			if (std::next(pattern) == pattern_end) {
@@ -1069,7 +1066,6 @@ vector<OpenFileInfo> S3FileSystem::Glob(const string &glob_pattern, FileOpener *
 	vector<string> pattern_splits = StringUtil::Split(parsed_s3_url.key, "/");
 	vector<OpenFileInfo> result;
 	for (auto &s3_key : s3_keys) {
-
 		vector<string> key_splits = StringUtil::Split(s3_key.path, "/");
 		bool is_match = Match(key_splits.begin(), key_splits.end(), pattern_splits.begin(), pattern_splits.end());
 
@@ -1295,7 +1291,6 @@ void AWSListObjectV2::ParseFileList(string &aws_response, vector<OpenFileInfo> &
 }
 
 string AWSListObjectV2::ParseContinuationToken(string &aws_response) {
-
 	auto open_tag_pos = aws_response.find("<NextContinuationToken>");
 	if (open_tag_pos == string::npos) {
 		return "";
