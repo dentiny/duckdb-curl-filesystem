@@ -12,6 +12,7 @@
 #include "duckdb/logging/file_system_logger.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/database.hpp"
+#include "duckdb/main/settings.hpp"
 #include "duckdb/main/secret/secret_manager.hpp"
 #include "http_state.hpp"
 
@@ -500,10 +501,10 @@ void HTTPFileSystem::Read(FileHandle &handle, void *buffer, int64_t nr_bytes, id
 	// attempt to download the full file and retry.
 
 	if (handle.logger) {
-		DUCKDB_LOG_WARN(handle.logger,
-		                "Falling back to full file download for file '%s': the server does not support HTTP range "
-		                "requests. Performance and memory usage are potentially degraded.",
-		                handle.path);
+		DUCKDB_LOG_WARNING(handle.logger,
+		                   "Falling back to full file download for file '%s': the server does not support HTTP range "
+		                   "requests. Performance and memory usage are potentially degraded.",
+		                   handle.path);
 	}
 
 	auto &hfh = handle.Cast<HTTPFileHandle>();
@@ -596,7 +597,12 @@ static optional_ptr<HTTPMetadataCache> TryGetMetadataCache(optional_ptr<FileOpen
 		return nullptr;
 	}
 
-	bool use_shared_cache = db->config.options.http_metadata_cache_enable;
+	bool use_shared_cache = false;
+	if (client_context) {
+		use_shared_cache = Settings::Get<EnableHTTPMetadataCacheSetting>(*client_context);
+	} else {
+		use_shared_cache = Settings::Get<EnableHTTPMetadataCacheSetting>(db->config);
+	}
 	if (use_shared_cache) {
 		return httpfs.GetGlobalCache();
 	} else if (client_context) {

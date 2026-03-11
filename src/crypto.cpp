@@ -23,8 +23,8 @@
 
 namespace duckdb {
 
-AESStateSSL::AESStateSSL(EncryptionTypes::CipherType cipher_p, idx_t key_len)
-    : EncryptionState(cipher_p, key_len), context(EVP_CIPHER_CTX_new()) {
+AESStateSSL::AESStateSSL(unique_ptr<EncryptionStateMetadata> metadata)
+    : EncryptionState(std::move(metadata)), context(EVP_CIPHER_CTX_new()) {
 	if (!(context)) {
 		throw InternalException("OpenSSL AES failed with initializing context");
 	}
@@ -35,9 +35,10 @@ AESStateSSL::~AESStateSSL() {
 	EVP_CIPHER_CTX_free(context);
 }
 
-const EVP_CIPHER *AESStateSSL::GetCipher(idx_t key_len) {
-
-	switch (cipher) {
+const EVP_CIPHER *AESStateSSL::GetEVPCipher() {
+	auto cipher_type = metadata->GetCipher();
+	auto key_len = metadata->GetKeyLen();
+	switch (cipher_type) {
 	case EncryptionTypes::GCM: {
 		switch (key_len) {
 		case 16:
@@ -75,7 +76,7 @@ const EVP_CIPHER *AESStateSSL::GetCipher(idx_t key_len) {
 		}
 	}
 	default:
-		throw InternalException("Invalid Encryption/Decryption Cipher: %d", static_cast<int>(cipher));
+		throw InternalException("Invalid Encryption/Decryption Cipher: %d", static_cast<int>(cipher_type));
 	}
 }
 
@@ -84,14 +85,12 @@ void AESStateSSL::GenerateRandomData(data_ptr_t data, idx_t len) {
 	RAND_bytes(data, len);
 }
 
-void AESStateSSL::InitializeEncryption(const_data_ptr_t iv, idx_t iv_len, const_data_ptr_t key, idx_t key_len_p,
-                                       const_data_ptr_t aad, idx_t aad_len) {
+void AESStateSSL::InitializeEncryption(EncryptionNonce &nonce, const_data_ptr_t key, const_data_ptr_t aad,
+                                       idx_t aad_len) {
 	mode = EncryptionTypes::ENCRYPT;
-
-	if (key_len_p != key_len) {
-		throw InternalException("Invalid encryption key length, expected %llu, got %llu", key_len, key_len_p);
-	}
-	if (1 != EVP_EncryptInit_ex(context, GetCipher(key_len), NULL, NULL, NULL)) {
+	auto iv = nonce.data();
+	auto iv_len = nonce.total_size();
+	if (1 != EVP_EncryptInit_ex(context, GetEVPCipher(), NULL, NULL, NULL)) {
 		throw InternalException("EncryptInit failed (attempt 1)");
 	}
 	if (1 != EVP_CIPHER_CTX_ctrl(context, EVP_CTRL_GCM_SET_IVLEN, iv_len, NULL)) {
@@ -103,24 +102,23 @@ void AESStateSSL::InitializeEncryption(const_data_ptr_t iv, idx_t iv_len, const_
 	}
 
 	int len;
-	if (aad_len > 0) {
-		if (!EVP_DecryptUpdate(context, NULL, &len, aad, aad_len)) {
-			throw InternalException("Setting Additional Authenticated Data  failed");
+	if (aad_len > 0 && aad != nullptr) {
+		if (!EVP_EncryptUpdate(context, NULL, &len, aad, aad_len)) {
+			throw InternalException("Setting Additional Authenticated Data failed");
 		}
 	}
 }
 
-void AESStateSSL::InitializeDecryption(const_data_ptr_t iv, idx_t iv_len, const_data_ptr_t key, idx_t key_len_p,
-                                       const_data_ptr_t aad, idx_t aad_len) {
+void AESStateSSL::InitializeDecryption(EncryptionNonce &nonce, const_data_ptr_t key, const_data_ptr_t aad,
+                                       idx_t aad_len) {
 	mode = EncryptionTypes::DECRYPT;
-	if (key_len_p != key_len) {
-		throw InternalException("Invalid encryption key length, expected %llu, got %llu", key_len, key_len_p);
-	}
-	if (1 != EVP_DecryptInit_ex(context, GetCipher(key_len), NULL, NULL, NULL)) {
+	auto iv = nonce.data();
+	auto iv_len = nonce.total_size();
+	if (1 != EVP_DecryptInit_ex(context, GetEVPCipher(), NULL, NULL, NULL)) {
 		throw InternalException("EVP_DecryptInit_ex failed to set cipher");
 	}
 	// we use a bigger IV for GCM
-	if (cipher == EncryptionTypes::GCM) {
+	if (metadata->GetCipher() == EncryptionTypes::GCM) {
 		if (1 != EVP_CIPHER_CTX_ctrl(context, EVP_CTRL_GCM_SET_IVLEN, iv_len, NULL)) {
 			throw InternalException("EVP_CIPHER_CTX_ctrl failed to set GCM iv len");
 		}
@@ -129,9 +127,9 @@ void AESStateSSL::InitializeDecryption(const_data_ptr_t iv, idx_t iv_len, const_
 		throw InternalException("EVP_DecryptInit_ex failed to set iv/key");
 	}
 	int len;
-	if (aad_len > 0) {
+	if (aad_len > 0 && aad != nullptr) {
 		if (!EVP_DecryptUpdate(context, NULL, &len, aad, aad_len)) {
-			throw InternalException("Setting Additional Authenticated Data  failed");
+			throw InternalException("Setting Additional Authenticated Data failed");
 		}
 	}
 }
@@ -148,7 +146,6 @@ size_t AESStateSSL::Process(const_data_ptr_t in, idx_t in_len, data_ptr_t out, i
 	case EncryptionTypes::DECRYPT:
 		if (1 != EVP_DecryptUpdate(context, data_ptr_cast(out), reinterpret_cast<int *>(&out_len),
 		                           const_data_ptr_cast(in), (int)in_len)) {
-
 			throw InternalException("DecryptUpdate failed");
 		}
 		break;
@@ -198,14 +195,12 @@ size_t AESStateSSL::FinalizeGCM(data_ptr_t out, idx_t out_len, data_ptr_t tag, i
 }
 
 size_t AESStateSSL::Finalize(data_ptr_t out, idx_t out_len, data_ptr_t tag, idx_t tag_len) {
-
-	if (cipher == EncryptionTypes::GCM) {
+	if (metadata->GetCipher() == EncryptionTypes::GCM) {
 		return FinalizeGCM(out, out_len, tag, tag_len);
 	}
 
 	auto text_len = out_len;
 	switch (mode) {
-
 	case EncryptionTypes::ENCRYPT: {
 		if (1 != EVP_EncryptFinal_ex(context, data_ptr_cast(out) + out_len, reinterpret_cast<int *>(&out_len))) {
 			throw InternalException("EncryptFinal failed");
