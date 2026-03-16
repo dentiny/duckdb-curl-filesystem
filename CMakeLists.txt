@@ -34,6 +34,7 @@ set(EXTENSION_SOURCES
     src/extension_loader_helper.cpp
     src/multi_curl_client.cpp
     src/multi_curl_manager.cpp
+    src/multi_curl_util.cpp
     src/tcp_connection_fetcher.cpp
     src/tcp_connection_query_function.cpp
     src/tcp_ip_recorder.cpp
