@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <curl/curl.h>
 #include <future>
 #include <vector>
 
@@ -8,8 +9,6 @@
 #include "duckdb/common/map.hpp"
 #include "duckdb/common/string.hpp"
 #include "duckdb/common/unique_ptr.hpp"
-#include "httpfs_client.hpp"
-#include "http_state.hpp"
 
 namespace duckdb {
 
