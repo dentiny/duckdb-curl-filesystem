@@ -1,0 +1,10 @@
+# name: test/sql/default_http_util.test
+# description: test that the default HTTP util is MultiCurl
+# group: [sql]
+
+require curl_httpfs
+
+query I
+SELECT curl_httpfs_http_util_name();
+----
+MultiCurl

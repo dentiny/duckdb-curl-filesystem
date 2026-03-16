@@ -1,157 +1,60 @@
 #include "curl_httpfs_extension.hpp"
 
-#include "create_secret_functions.hpp"
 #include "duckdb.hpp"
-#include "duckdb/common/local_file_system.hpp"
-#include "duckdb/main/client_context_file_opener.hpp"
 #include "extension_loader_helper.hpp"
 #include "hffs.hpp"
-#include "httpfs_curl_client.hpp"
+#include "httpfs_extension.hpp"
 #include "multi_curl_util.hpp"
 #include "s3fs.hpp"
-
-#ifdef OVERRIDE_ENCRYPTION_UTILS
-#include "crypto.hpp"
-#endif // OVERRIDE_ENCRYPTION_UTILS
 
 namespace duckdb {
 
 namespace {
 
+// "httpfs" extension name.
+constexpr const char *HTTPFS_EXTENSION = "httpfs";
+
+// Whether `httpfs` extension has already been loaded.
+bool IsHttpfsExtensionLoaded(DatabaseInstance &db_instance) {
+	auto &extension_manager = db_instance.GetExtensionManager();
+	const auto loaded_extensions = extension_manager.GetExtensions();
+	return std::find(loaded_extensions.begin(), loaded_extensions.end(), HTTPFS_EXTENSION) != loaded_extensions.end();
+}
+
+// Ensure httpfs extension is loaded, loading it if necessary
+void EnsureHttpfsExtensionLoaded(ExtensionLoader &loader, DatabaseInstance &instance) {
+	const bool httpfs_extension_loaded = IsHttpfsExtensionLoaded(instance);
+	if (httpfs_extension_loaded) {
+		return;
+	}
+	auto httpfs_extension = make_uniq<HttpfsExtension>();
+	httpfs_extension->Load(loader);
+
+	// Register into extension manager to keep compatibility as httpfs.
+	auto &extension_manager = ExtensionManager::Get(instance);
+	auto extension_active_load = extension_manager.BeginLoad(HTTPFS_EXTENSION);
+	// Manually fill in the extension install info to finalize extension load.
+	ExtensionInstallInfo extension_install_info;
+	extension_install_info.mode = ExtensionInstallMode::UNKNOWN;
+	extension_active_load->FinishLoad(extension_install_info);
+}
+
 void LoadInternal(ExtensionLoader &loader) {
 	auto &instance = loader.GetDatabaseInstance();
 	auto &fs = instance.GetFileSystem();
 
-	fs.RegisterSubSystem(make_uniq<HTTPFileSystem>());
-	fs.RegisterSubSystem(make_uniq<HuggingFaceFileSystem>());
-	fs.RegisterSubSystem(make_uniq<S3FileSystem>(BufferManager::GetBufferManager(instance)));
+	// To achieve full compatibility for duckdb-httpfs extension, all related functions/types/... should be supported,
+	// so we load it first if not already loaded.
+	EnsureHttpfsExtensionLoaded(loader, instance);
 
+	// Override the default HTTP util to MultiCurlUtil for this extension.
 	auto &config = DBConfig::GetConfig(instance);
-
-	config.AddExtensionOption("http_timeout", "HTTP timeout read/write/connection/retry (in seconds)",
-	                          LogicalType::UBIGINT, Value::UBIGINT(HTTPParams::DEFAULT_TIMEOUT_SECONDS));
-	config.AddExtensionOption("http_retries", "HTTP retries on I/O error", LogicalType::UBIGINT, Value(3));
-	config.AddExtensionOption("http_retry_wait_ms", "Time between retries", LogicalType::UBIGINT, Value(100));
-	config.AddExtensionOption("force_download", "Forces upfront download of file", LogicalType::BOOLEAN, Value(false));
-	config.AddExtensionOption("auto_fallback_to_full_download",
-	                          "Allows automatically falling back to full file downloads when possible.",
-	                          LogicalType::BOOLEAN, Value(true));
-	config.AddExtensionOption("http_retry_backoff", "Backoff factor for exponentially increasing retry wait time",
-	                          LogicalType::FLOAT, Value(4));
-	config.AddExtensionOption(
-	    "http_keep_alive",
-	    "Keep alive connections. Setting this to false can help when running into connection failures",
-	    LogicalType::BOOLEAN, Value(true));
-	config.AddExtensionOption("allow_asterisks_in_http_paths", "Allow '*' character in URLs users can query",
-	                          LogicalType::BOOLEAN, Value(false));
-	config.AddExtensionOption("enable_curl_server_cert_verification",
-	                          "Enable server side certificate verification for CURL backend.", LogicalType::BOOLEAN,
-	                          Value(true));
-	config.AddExtensionOption("enable_server_cert_verification", "Enable server side certificate verification.",
-	                          LogicalType::BOOLEAN, Value(false));
-	auto callback_ca_cert_file = [](ClientContext &context, SetScope scope, Value &parameter) {
-		if (parameter.IsNull()) {
-			throw InvalidInputException("NULL it's not a valid option for ca_cert_file");
-		}
-		string value = StringValue::Get(parameter);
-		if (value.empty()) {
-			parameter = Value("");
-			return;
-		}
-		LocalFileSystem fs;
-		ClientContextFileOpener opener(context);
-		parameter = Value(fs.CanonicalizePath(value, opener));
-	};
-	config.AddExtensionOption("ca_cert_file", "Path to a custom certificate file for self-signed certificates.",
-	                          LogicalType::VARCHAR, Value(""), callback_ca_cert_file);
-
-	config.AddExtensionOption("s3_region", "S3 Region", LogicalType::VARCHAR);
-	config.AddExtensionOption("s3_access_key_id", "S3 Access Key ID", LogicalType::VARCHAR);
-	config.AddExtensionOption("s3_secret_access_key", "S3 Access Key", LogicalType::VARCHAR);
-	config.AddExtensionOption("s3_session_token", "S3 Session Token", LogicalType::VARCHAR);
-	config.AddExtensionOption("s3_endpoint", "S3 Endpoint", LogicalType::VARCHAR);
-	config.AddExtensionOption("s3_url_style", "S3 URL style", LogicalType::VARCHAR, Value("vhost"));
-	config.AddExtensionOption("s3_use_ssl", "S3 use SSL", LogicalType::BOOLEAN, Value(true));
-	config.AddExtensionOption("s3_kms_key_id", "S3 KMS Key ID", LogicalType::VARCHAR);
-	config.AddExtensionOption("s3_url_compatibility_mode", "Disable Globs and Query Parameters on S3 URLs",
-	                          LogicalType::BOOLEAN, Value(false));
-	config.AddExtensionOption("s3_requester_pays", "S3 use requester pays mode", LogicalType::BOOLEAN, Value(false));
-	config.AddExtensionOption(
-	    "s3_allow_recursive_globbing",
-	    "Whether globs on S3-like storage are optimized with recursive strategy (alterative is listing)",
-	    LogicalType::BOOLEAN, Value(true));
-
-	config.AddExtensionOption("s3_uploader_max_filesize", "S3 Uploader max filesize (between 50GB and 5TB)",
-	                          LogicalType::VARCHAR, "800GB");
-	config.AddExtensionOption("s3_uploader_max_parts_per_file", "S3 Uploader max parts per file (between 1 and 10000)",
-	                          LogicalType::UBIGINT, Value(10000));
-	config.AddExtensionOption("s3_uploader_thread_limit", "S3 Uploader global thread limit", LogicalType::UBIGINT,
-	                          Value(50));
-	config.AddExtensionOption("unsafe_disable_etag_checks", "Disable checks on ETag consistency", LogicalType::BOOLEAN,
-	                          Value(false));
-	config.AddExtensionOption("s3_version_id_pinning", "Pin S3 reads to a specific object version for consistency",
-	                          LogicalType::BOOLEAN, Value(false));
-
-	config.AddExtensionOption("hf_max_per_page", "Debug option to limit number of items returned in list requests",
-	                          LogicalType::UBIGINT, Value::UBIGINT(0));
-
-	config.AddExtensionOption("merge_http_secret_into_s3_request", "Merges http secret params into S3 requests",
-	                          LogicalType::BOOLEAN, Value(true));
-
-	auto callback_httpfs_client_implementation = [](ClientContext &context, SetScope scope, Value &parameter) {
-		auto &config = DBConfig::GetConfig(context);
-		string value = StringValue::Get(parameter);
-		if (config.http_util && config.http_util->GetName() == "WasmHTTPUtils") {
-			if (value == "wasm" || value == "default") {
-				return;
-			}
-			throw InvalidInputException("Unsupported option for httpfs_client_implementation, only `wasm` and "
-			                            "`default` are currently supported for duckdb-wasm");
-		}
-		if (value == "multi_curl" || value == "default") {
-			if (!config.http_util || config.http_util->GetName() != "MultiCurl") {
-				config.http_util = make_shared_ptr<MultiCurlUtil>();
-			}
-			return;
-		}
-		if (value == "curl") {
-			if (!config.http_util || config.http_util->GetName() != "HTTPFSUtil-Curl") {
-				config.http_util = make_shared_ptr<HTTPFSCurlUtil>();
-			}
-			return;
-		}
-		if (value == "httplib") {
-			if (!config.http_util || config.http_util->GetName() != "HTTPFSUtil") {
-				config.http_util = make_shared_ptr<HTTPFSUtil>();
-			}
-			return;
-		}
-		throw InvalidInputException("Unsupported option for httpfs_client_implementation, only `multi_curl`, `curl`, "
-		                            "`httplib` and `default` are currently supported");
-	};
-	config.AddExtensionOption("httpfs_client_implementation", "Select which is the HTTPUtil implementation to be used",
-	                          LogicalType::VARCHAR, "default", callback_httpfs_client_implementation);
-	config.AddExtensionOption("enable_global_s3_configuration",
-	                          "Automatically fetch AWS credentials from environment variables.", LogicalType::BOOLEAN,
-	                          Value::BOOLEAN(true));
-
-	if (config.http_util && config.http_util->GetName() == "WasmHTTPUtils") {
-		// Already handled, do not override
-	} else {
+	if (!(config.http_util && config.http_util->GetName() == "WasmHTTPUtils")) {
 		config.http_util = make_shared_ptr<MultiCurlUtil>();
 	}
 
-	auto provider = make_uniq<AWSEnvironmentCredentialsProvider>(config);
-	provider->SetAll();
-
-	CreateS3SecretFunctions::Register(loader);
-	CreateBearerTokenFunctions::Register(loader);
-
+	// Register curl_httpfs-specific functions and settings.
 	LoadExtensionInternal(loader);
-
-#ifdef OVERRIDE_ENCRYPTION_UTILS
-	config.encryption_util = make_shared_ptr<AESStateSSLFactory>();
-#endif // OVERRIDE_ENCRYPTION_UTILS
 }
 
 } // namespace
