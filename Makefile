@@ -12,13 +12,4 @@ format-all: format
 	find benchmark/ -iname *.hpp -o -iname *.cpp | xargs clang-format --sort-includes=0 -style=file -i
 	cmake-format -i CMakeLists.txt
 
-test_unit: all
-	find build/release/extension/curl_httpfs/ -type f -name "*test*" -not -name "*.o" -not -name "*.cpp" -not -name "*.d" -exec {} \;
-
-test_reldebug_unit: reldebug
-	find build/reldebug/extension/curl_httpfs/ -type f -name "*test*" -not -name "*.o" -not -name "*.cpp" -not -name "*.d" -exec {} \;
-
-test_debug_unit: debug
-	find build/debug/extension/curl_httpfs/ -type f -name "*test*" -not -name "*.o" -not -name "*.cpp" -not -name "*.d" -exec {} \;
-
-PHONY: format-all test_unit test_reldebug_unit test_debug_unit
+PHONY: format-all

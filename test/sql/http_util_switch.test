@@ -6,7 +6,12 @@ require curl_httpfs
 
 # Default should be multi_curl
 statement ok
-SET httpfs_client_implementation='default';
+SET curl_httpfs_client_implementation='default';
+
+query I
+SELECT curl_httpfs_http_util_name();
+----
+MultiCurl
 
 query I
 SELECT length(content) > 0 FROM read_text('https://raw.githubusercontent.com/dentiny/duck-read-cache-fs/main/test/data/stock-exchanges.csv');
@@ -15,7 +20,12 @@ true
 
 # Switch to multi_curl explicitly
 statement ok
-SET httpfs_client_implementation='multi_curl';
+SET curl_httpfs_client_implementation='multi_curl';
+
+query I
+SELECT curl_httpfs_http_util_name();
+----
+MultiCurl
 
 query I
 SELECT length(content) > 0 FROM read_text('https://raw.githubusercontent.com/dentiny/duck-read-cache-fs/main/test/data/stock-exchanges.csv');
@@ -24,7 +34,12 @@ true
 
 # Switch to upstream curl (no multi-curl async)
 statement ok
-SET httpfs_client_implementation='curl';
+SET curl_httpfs_client_implementation='curl';
+
+query I
+SELECT curl_httpfs_http_util_name();
+----
+HTTPFS-Curl
 
 query I
 SELECT length(content) > 0 FROM read_text('https://raw.githubusercontent.com/dentiny/duck-read-cache-fs/main/test/data/stock-exchanges.csv');
@@ -33,7 +48,12 @@ true
 
 # Switch to httplib
 statement ok
-SET httpfs_client_implementation='httplib';
+SET curl_httpfs_client_implementation='httplib';
+
+query I
+SELECT curl_httpfs_http_util_name();
+----
+HTTPFS
 
 query I
 SELECT length(content) > 0 FROM read_text('https://raw.githubusercontent.com/dentiny/duck-read-cache-fs/main/test/data/stock-exchanges.csv');
@@ -42,7 +62,12 @@ true
 
 # Switch back to multi_curl
 statement ok
-SET httpfs_client_implementation='multi_curl';
+SET curl_httpfs_client_implementation='multi_curl';
+
+query I
+SELECT curl_httpfs_http_util_name();
+----
+MultiCurl
 
 query I
 SELECT length(content) > 0 FROM read_text('https://raw.githubusercontent.com/dentiny/duck-read-cache-fs/main/test/data/stock-exchanges.csv');
@@ -51,6 +76,6 @@ true
 
 # Invalid implementation should error
 statement error
-SET httpfs_client_implementation='nonexistent';
+SET curl_httpfs_client_implementation='nonexistent';
 ----
-Unsupported option for httpfs_client_implementation
+Unsupported option for curl_httpfs_client_implementation

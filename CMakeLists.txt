@@ -26,6 +26,7 @@ set(EXTENSION_SOURCES
     duckdb-httpfs/src/http_state.cpp
     duckdb-httpfs/src/httpfs.cpp
     duckdb-httpfs/src/httpfs_curl_client.cpp
+    duckdb-httpfs/src/httpfs_extension.cpp
     duckdb-httpfs/src/httpfs_httplib_client.cpp
     duckdb-httpfs/src/s3fs.cpp
     duckdb-httpfs/src/s3_multi_part_upload.cpp
@@ -71,6 +72,8 @@ target_link_libraries(http_filesystem_test ${EXTENSION_NAME} duckdb_static
                       dummy_static_extension_loader)
 
 # Benchmark
-add_executable(multicurl_benchmark benchmark/multicurl_benchmark.cpp)
-target_link_libraries(multicurl_benchmark ${EXTENSION_NAME} duckdb_static
-                      dummy_static_extension_loader)
+if(${BUILD_BENCHMARKS})
+  add_executable(multicurl_benchmark benchmark/multicurl_benchmark.cpp)
+  target_link_libraries(multicurl_benchmark ${EXTENSION_NAME} duckdb_static
+                        dummy_static_extension_loader)
+endif()
