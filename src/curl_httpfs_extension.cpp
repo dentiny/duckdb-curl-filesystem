@@ -1,14 +1,14 @@
 #include "curl_httpfs_extension.hpp"
 
-#include "multi_curl_util.hpp"
 #include "create_secret_functions.hpp"
 #include "duckdb.hpp"
-#include "extension_loader_helper.hpp"
-#include "s3fs.hpp"
-#include "hffs.hpp"
 #include "duckdb/common/local_file_system.hpp"
 #include "duckdb/main/client_context_file_opener.hpp"
+#include "extension_loader_helper.hpp"
+#include "hffs.hpp"
 #include "httpfs_curl_client.hpp"
+#include "multi_curl_util.hpp"
+#include "s3fs.hpp"
 
 #ifdef OVERRIDE_ENCRYPTION_UTILS
 #include "crypto.hpp"
