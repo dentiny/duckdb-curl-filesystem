@@ -1,3 +1,15 @@
+# 0.3.0
+
+## Changed
+
+- Rewrite extension with DuckDB http util interface, so we don't need to hard-fork httpfs extension ([#52])
+
+[#52]: https://github.com/dentiny/duckdb-curl-filesystem/pull/52
+
+- Implement compatibility with httpfs extension ([#53])
+
+[#53]: https://github.com/dentiny/duckdb-curl-filesystem/pull/53
+
 # 0.2.5
 
 ## Changed
