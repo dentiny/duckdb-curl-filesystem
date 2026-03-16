@@ -15,22 +15,26 @@ set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
 
 project(${TARGET_NAME})
 include_directories(src/include)
+include_directories(duckdb-httpfs/src/include)
 include_directories(duckdb/third_party/httplib)
 
 set(EXTENSION_SOURCES
-    src/create_secret_functions.cpp
-    src/crypto.cpp
+    duckdb-httpfs/src/create_secret_functions.cpp
+    duckdb-httpfs/src/crypto.cpp
+    duckdb-httpfs/src/hash_functions.cpp
+    duckdb-httpfs/src/hffs.cpp
+    duckdb-httpfs/src/http_state.cpp
+    duckdb-httpfs/src/httpfs.cpp
+    duckdb-httpfs/src/httpfs_curl_client.cpp
+    duckdb-httpfs/src/httpfs_httplib_client.cpp
+    duckdb-httpfs/src/s3fs.cpp
+    duckdb-httpfs/src/s3_multi_part_upload.cpp
     src/curl_httpfs_extension.cpp
     src/curl_request.cpp
     src/extension_loader_helper.cpp
-    src/hash_functions.cpp
-    src/hffs.cpp
-    src/http_state.cpp
-    src/httpfs.cpp
-    src/httpfs_curl_client.cpp
-    src/httpfs_httplib_client.cpp
+    src/multi_curl_client.cpp
     src/multi_curl_manager.cpp
-    src/s3fs.cpp
+    src/multi_curl_util.cpp
     src/tcp_connection_fetcher.cpp
     src/tcp_connection_query_function.cpp
     src/tcp_ip_recorder.cpp
