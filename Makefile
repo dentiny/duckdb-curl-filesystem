@@ -16,11 +16,6 @@ HTTPFS_TEST_TMPDIR := /tmp/curl-httpfs-duckdb-httpfs-test
 
 # httpfs tests to skip for curl_httpfs compatibility testing.
 HTTPFS_TEST_BLACKLIST := \
-	test/sql/copy/encryption/different_aes_engines.test \
-	test/sql/copy/parquet/parquet_encryption_httpfs.test \
-	test/sql/copy/parquet/parquet_encryption_mbedtls_openssl.test \
-	test/sql/crypto/test_openssl_crypto.test \
-	test/sql/httpfs/ca_cert_file.test \
 	test/sql/logging/http_logging.test \
 	test/sql/storage/external_file_cache/external_file_cache_httpfs.test \
 	test/sql/storage/external_file_cache/external_file_cache_read_blob.test_slow
