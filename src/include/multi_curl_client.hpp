@@ -22,8 +22,7 @@ public:
 	unique_ptr<HTTPResponse> Post(PostRequestInfo &info) override;
 
 private:
-	CURLRequestHeaders TransformHeadersCurl(const HTTPHeaders &header_map);
-	string TransformParamsCurl(const HTTPParams &params);
+	CURLRequestHeaders TransformHeadersCurl(const HTTPHeaders &header_map, const HTTPParams &params);
 	void ResetRequestInfo();
 	unique_ptr<HTTPResponse> TransformResponseCurl(CURLcode res);
 

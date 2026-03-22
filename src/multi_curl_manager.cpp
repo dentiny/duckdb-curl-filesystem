@@ -53,6 +53,15 @@ void CheckMulti(GlobalInfo *g) {
 		auto resp = make_uniq<HTTPResponse>(status_code);
 		resp->body = req->info->body;
 		resp->url = req->info->url;
+		resp->reason = HTTPUtil::GetStatusMessage(status_code);
+		if (!req->info->header_collection.empty()) {
+			for (auto &header : req->info->header_collection.back()) {
+				if (header.first == "__RESPONSE_STATUS__") {
+					continue;
+				}
+				resp->headers.Insert(header.first, header.second);
+			}
+		}
 		req->response.set_value(std::move(resp));
 
 		curl_multi_remove_handle(g->multi, easy);
