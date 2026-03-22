@@ -16,9 +16,7 @@ HTTPFS_TEST_TMPDIR := /tmp/curl-httpfs-duckdb-httpfs-test
 
 # httpfs tests to skip for curl_httpfs compatibility testing.
 HTTPFS_TEST_BLACKLIST := \
-	test/sql/logging/http_logging.test \
-	test/sql/storage/external_file_cache/external_file_cache_httpfs.test \
-	test/sql/storage/external_file_cache/external_file_cache_read_blob.test_slow
+	test/sql/logging/http_logging.test
 
 # Prepare httpfs tests: rewrite require directives, inject metrics clear, and remove blacklisted tests.
 define PREPARE_HTTPFS_TESTS
@@ -27,8 +25,7 @@ define PREPARE_HTTPFS_TESTS
 	@cp -r duckdb-httpfs/test $(HTTPFS_TEST_TMPDIR)/test
 	@find $(HTTPFS_TEST_TMPDIR)/test -type f \( -name "*.test" -o -name "*.test_slow" \) -exec \
 		sed -i 's/^require httpfs$$/require curl_httpfs\n\nstatement ok\nSELECT curl_httpfs_clear_metrics();/' {} +
-	@for f in $(HTTPFS_TEST_BLACKLIST); do rm -f $(HTTPFS_TEST_TMPDIR)/$$f; done
-	@rm -rf $(HTTPFS_TEST_TMPDIR)
+	@for f in $(HTTPFS_TEST_BLACKLIST); do rm -f $(HTTPFS_TEST_TMPDIR)/$$f; done;
 endef
 
 test_reldebug_httpfs:

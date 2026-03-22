@@ -83,7 +83,13 @@ void MultiCurlClient::Initialize(HTTPParams &http_p) {
 
 	InitCurlGlobal();
 
-	curl = make_uniq<CURLHandle>(bearer_token, SelectCURLCertPath());
+	std::string cert_file_path;
+	if (!http_params.ca_cert_file.empty()) {
+		cert_file_path = http_params.ca_cert_file;
+	} else {
+		cert_file_path = SelectCURLCertPath();
+	}
+	curl = make_uniq<CURLHandle>(bearer_token, cert_file_path);
 	request_info = make_uniq<RequestInfo>();
 
 	curl_easy_setopt(*curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
@@ -131,12 +137,8 @@ unique_ptr<HTTPResponse> MultiCurlClient::Get(GetRequestInfo &info) {
 		state->get_count++;
 	}
 
-	auto curl_headers = TransformHeadersCurl(info.headers);
+	auto curl_headers = TransformHeadersCurl(info.headers, info.params);
 	string url = info.url;
-	if (!info.params.extra_headers.empty()) {
-		auto curl_params = TransformParamsCurl(info.params);
-		url += "?" + curl_params;
-	}
 
 	auto req = make_uniq<CurlRequest>(*curl);
 	req->SetUrl(std::move(url));
@@ -146,6 +148,11 @@ unique_ptr<HTTPResponse> MultiCurlClient::Get(GetRequestInfo &info) {
 	auto response = MultiCurlManager::GetInstance().HandleRequest(std::move(req));
 	if (state) {
 		state->total_bytes_received += response->body.size();
+	}
+	if (info.response_handler) {
+		if (!info.response_handler(*response)) {
+			return response;
+		}
 	}
 	if (info.content_handler) {
 		info.content_handler(const_data_ptr_cast(response->body.c_str()), response->body.size());
@@ -159,13 +166,9 @@ unique_ptr<HTTPResponse> MultiCurlClient::Put(PutRequestInfo &info) {
 		state->total_bytes_sent += info.buffer_in_len;
 	}
 
-	auto curl_headers = TransformHeadersCurl(info.headers);
+	auto curl_headers = TransformHeadersCurl(info.headers, info.params);
 	curl_headers.Add("Content-Type: " + info.content_type);
 	request_info->url = info.url;
-	if (!info.params.extra_headers.empty()) {
-		auto curl_params = TransformParamsCurl(info.params);
-		request_info->url += "?" + curl_params;
-	}
 
 	CURLcode res;
 	{
@@ -186,12 +189,8 @@ unique_ptr<HTTPResponse> MultiCurlClient::Head(HeadRequestInfo &info) {
 		state->head_count++;
 	}
 
-	auto curl_headers = TransformHeadersCurl(info.headers);
+	auto curl_headers = TransformHeadersCurl(info.headers, info.params);
 	string url = info.url;
-	if (!info.params.extra_headers.empty()) {
-		auto curl_params = TransformParamsCurl(info.params);
-		url += "?" + curl_params;
-	}
 
 	auto req = make_uniq<CurlRequest>(*curl);
 	req->SetUrl(std::move(url));
@@ -207,12 +206,8 @@ unique_ptr<HTTPResponse> MultiCurlClient::Delete(DeleteRequestInfo &info) {
 		state->delete_count++;
 	}
 
-	auto curl_headers = TransformHeadersCurl(info.headers);
+	auto curl_headers = TransformHeadersCurl(info.headers, info.params);
 	request_info->url = info.url;
-	if (!info.params.extra_headers.empty()) {
-		auto curl_params = TransformParamsCurl(info.params);
-		request_info->url += "?" + curl_params;
-	}
 
 	CURLcode res;
 	{
@@ -233,14 +228,10 @@ unique_ptr<HTTPResponse> MultiCurlClient::Post(PostRequestInfo &info) {
 		state->total_bytes_sent += info.buffer_in_len;
 	}
 
-	auto curl_headers = TransformHeadersCurl(info.headers);
+	auto curl_headers = TransformHeadersCurl(info.headers, info.params);
 	const string content_type = "Content-Type: application/octet-stream";
 	curl_headers.Add(content_type.c_str());
 	request_info->url = info.url;
-	if (!info.params.extra_headers.empty()) {
-		auto curl_params = TransformParamsCurl(info.params);
-		request_info->url += "?" + curl_params;
-	}
 
 	CURLcode res;
 	{
@@ -257,7 +248,9 @@ unique_ptr<HTTPResponse> MultiCurlClient::Post(PostRequestInfo &info) {
 	return TransformResponseCurl(res);
 }
 
-CURLRequestHeaders MultiCurlClient::TransformHeadersCurl(const HTTPHeaders &header_map) {
+CURLRequestHeaders MultiCurlClient::TransformHeadersCurl(const HTTPHeaders &header_map, const HTTPParams &params) {
+	auto &httpfs_params = params.Cast<HTTPFSParams>();
+
 	std::vector<std::string> headers;
 	for (auto &entry : header_map) {
 		const std::string new_header = entry.first + ": " + entry.second;
@@ -267,22 +260,12 @@ CURLRequestHeaders MultiCurlClient::TransformHeadersCurl(const HTTPHeaders &head
 	for (auto &header : headers) {
 		curl_headers.Add(header);
 	}
-	return curl_headers;
-}
-
-string MultiCurlClient::TransformParamsCurl(const HTTPParams &params) {
-	string result = "";
-	bool first_param = true;
-	for (auto &entry : params.extra_headers) {
-		const string key = entry.first;
-		const string value = curl_easy_escape(*curl, entry.second.c_str(), 0);
-		if (!first_param) {
-			result += "&";
+	if (!httpfs_params.pre_merged_headers) {
+		for (auto &entry : params.extra_headers) {
+			curl_headers.Add(entry.first + ": " + entry.second);
 		}
-		result += key + "=" + value;
-		first_param = false;
 	}
-	return result;
+	return curl_headers;
 }
 
 void MultiCurlClient::ResetRequestInfo() {

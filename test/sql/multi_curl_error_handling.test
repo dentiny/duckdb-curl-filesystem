@@ -1,0 +1,23 @@
+# name: test/sql/multi_curl_error_handling.test
+# description: test that multi_curl properly handles HTTP errors via response_handler (matching curl behavior)
+# group: [sql]
+
+require curl_httpfs
+
+require parquet
+
+# Verify multi_curl throws on non-existent file (HTTP 404)
+statement ok
+SET curl_httpfs_client_implementation='multi_curl';
+
+statement error
+SELECT * FROM PARQUET_SCAN('https://raw.githubusercontent.com/duckdb/duckdb/main/data/parquet-testing/nonexistent_file.parquet');
+----
+
+# Verify curl also throws on the same non-existent file
+statement ok
+SET curl_httpfs_client_implementation='curl';
+
+statement error
+SELECT * FROM PARQUET_SCAN('https://raw.githubusercontent.com/duckdb/duckdb/main/data/parquet-testing/nonexistent_file.parquet');
+----
