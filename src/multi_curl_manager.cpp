@@ -367,6 +367,7 @@ void MultiCurlManager::ProcessPendingRequests() {
 	while (true) {
 		unique_ptr<CurlRequest> curl_request;
 		{
+			const std::lock_guard<std::mutex> lck(mu);
 			if (pending_requests.empty()) {
 				return;
 			}
@@ -389,7 +390,7 @@ unique_ptr<HTTPResponse> MultiCurlManager::HandleRequest(unique_ptr<CurlRequest>
 	auto resp_fut = request->response.get_future();
 	CURL *easy_curl = request->easy_curl;
 	{
-		std::lock_guard<std::mutex> lck(mu);
+		const std::lock_guard<std::mutex> lck(mu);
 		pending_requests.emplace(std::move(request));
 	}
 
