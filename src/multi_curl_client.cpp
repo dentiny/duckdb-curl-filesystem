@@ -13,7 +13,7 @@ namespace duckdb {
 
 namespace {
 
-std::atomic<idx_t> multi_curl_client_count {0};
+std::once_flag multi_curl_client_flag;
 
 static std::string certFileLocations[] = {
     "/etc/ssl/certs/ca-certificates.crt", "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
@@ -110,7 +110,6 @@ void MultiCurlClient::Initialize(HTTPParams &http_p) {
 	curl_easy_setopt(*curl, CURLOPT_TIMEOUT, http_params.timeout);
 	curl_easy_setopt(*curl, CURLOPT_CONNECTTIMEOUT, http_params.timeout);
 	curl_easy_setopt(*curl, CURLOPT_ACCEPT_ENCODING, "identity");
-	curl_easy_setopt(*curl, CURLOPT_FOLLOWLOCATION, 1L);
 
 	curl_easy_setopt(*curl, CURLOPT_HEADERFUNCTION, RequestHeaderCallback);
 	curl_easy_setopt(*curl, CURLOPT_HEADERDATA, &request_info->header_collection);
@@ -299,10 +298,7 @@ unique_ptr<HTTPResponse> MultiCurlClient::TransformResponseCurl(CURLcode res) {
 }
 
 void MultiCurlClient::InitCurlGlobal() {
-	if (multi_curl_client_count == 0) {
-		curl_global_init(CURL_GLOBAL_DEFAULT);
-	}
-	++multi_curl_client_count;
+	std::call_once(multi_curl_client_flag, []() { curl_global_init(CURL_GLOBAL_DEFAULT); });
 }
 
 void MultiCurlClient::DestroyCurlGlobal() {
