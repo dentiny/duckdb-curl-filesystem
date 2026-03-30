@@ -22,7 +22,7 @@ void ClearAllCache(const DataChunk &args, ExpressionState &state, Vector &result
 // Get the name of the active HTTP util implementation.
 void GetHttpUtilName(const DataChunk &args, ExpressionState &state, Vector &result) {
 	auto &config = DBConfig::GetConfig(*state.GetContext().db);
-	string name = config.http_util ? config.http_util->GetName() : "(None)";
+	string name = config.GetHTTPUtil().GetName();
 	result.Reference(Value(name));
 }
 } // namespace
@@ -40,7 +40,7 @@ void LoadExtensionInternal(ExtensionLoader &loader) {
 	auto callback_httpfs_client_implementation = [](ClientContext &context, SetScope scope, Value &parameter) {
 		auto &config = DBConfig::GetConfig(context);
 		string value = StringValue::Get(parameter);
-		if (config.http_util && config.http_util->GetName() == "WasmHTTPUtils") {
+		if (config.GetHTTPUtil().GetName() == "WasmHTTPUtils") {
 			if (value == "wasm" || value == "default") {
 				return;
 			}
@@ -48,20 +48,20 @@ void LoadExtensionInternal(ExtensionLoader &loader) {
 			                            "`default` are currently supported for duckdb-wasm");
 		}
 		if (value == "multi_curl" || value == "default") {
-			if (!config.http_util || config.http_util->GetName() != "MultiCurl") {
-				config.http_util = make_shared_ptr<MultiCurlUtil>();
+			if (config.GetHTTPUtil().GetName() != "MultiCurl") {
+				config.SetHTTPUtil(make_shared_ptr<MultiCurlUtil>());
 			}
 			return;
 		}
 		if (value == "curl") {
-			if (!config.http_util || config.http_util->GetName() != "HTTPFSUtil-Curl") {
-				config.http_util = make_shared_ptr<HTTPFSCurlUtil>();
+			if (config.GetHTTPUtil().GetName() != "HTTPFSUtil-Curl") {
+				config.SetHTTPUtil(make_shared_ptr<HTTPFSCurlUtil>());
 			}
 			return;
 		}
 		if (value == "httplib") {
-			if (!config.http_util || config.http_util->GetName() != "HTTPFSUtil") {
-				config.http_util = make_shared_ptr<HTTPFSUtil>();
+			if (config.GetHTTPUtil().GetName() != "HTTPFSUtil") {
+				config.SetHTTPUtil(make_shared_ptr<HTTPFSUtil>());
 			}
 			return;
 		}

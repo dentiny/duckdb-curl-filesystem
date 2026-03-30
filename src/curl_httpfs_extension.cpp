@@ -49,8 +49,8 @@ void LoadInternal(ExtensionLoader &loader) {
 
 	// Override the default HTTP util to MultiCurlUtil for this extension.
 	auto &config = DBConfig::GetConfig(instance);
-	if (!(config.http_util && config.http_util->GetName() == "WasmHTTPUtils")) {
-		config.http_util = make_shared_ptr<MultiCurlUtil>();
+	if (config.GetHTTPUtil().GetName() != "WasmHTTPUtils") {
+		config.SetHTTPUtil(make_shared_ptr<MultiCurlUtil>());
 	}
 
 	// Register curl_httpfs-specific functions and settings.
