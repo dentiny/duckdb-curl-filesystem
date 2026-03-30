@@ -22,7 +22,7 @@ using namespace duckdb;
 TEST_CASE("Range read test", "[filesystem test]") {
 	DuckDB db(nullptr);
 	auto &instance = db.instance;
-	instance->config.http_util = make_shared_ptr<HTTPFSCurlUtil>();
+	instance->config.SetHTTPUtil(make_shared_ptr<HTTPFSCurlUtil>());
 	auto client_context = make_shared_ptr<ClientContext>(instance);
 	client_context->transaction.BeginTransaction();
 	ClientContextFileOpener file_opener {*client_context};
@@ -43,7 +43,7 @@ TEST_CASE("Range read test", "[filesystem test]") {
 TEST_CASE("Concurrent range read test", "[filesystem test]") {
 	DuckDB db(nullptr);
 	auto &instance = db.instance;
-	instance->config.http_util = make_shared_ptr<HTTPFSCurlUtil>();
+	instance->config.SetHTTPUtil(make_shared_ptr<HTTPFSCurlUtil>());
 	auto client_context = make_shared_ptr<ClientContext>(instance);
 	client_context->transaction.BeginTransaction();
 	ClientContextFileOpener file_opener {*client_context};
