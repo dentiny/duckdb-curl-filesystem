@@ -1,3 +1,21 @@
+# 0.4.0
+
+## Changed
+
+- Upgrade DuckDB core, extension-ci-tools and httpfs extension to v1.5.1 ([#63])
+
+[#63]: https://github.com/dentiny/duckdb-curl-filesystem/pull/63
+
+## Fixed
+
+- Fix a few incompatibility with httpfs extension curl implementation ([#62])
+
+[#62]: https://github.com/dentiny/duckdb-curl-filesystem/pull/62
+
+- Override DuckDB Mtls TLS with openssl ([#60])
+
+[#60]: https://github.com/dentiny/duckdb-curl-filesystem/pull/60
+
 # 0.3.0
 
 ## Changed
