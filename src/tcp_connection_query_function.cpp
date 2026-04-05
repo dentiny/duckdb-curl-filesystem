@@ -37,8 +37,8 @@ struct TcpConnectionData : public GlobalTableFunctionState {
 
 unique_ptr<FunctionData> GetTcpConnectionNumFuncBind(ClientContext &context, TableFunctionBindInput &input,
                                                      vector<LogicalType> &return_types, vector<string> &names) {
-	D_ASSERT(return_types.empty());
-	D_ASSERT(names.empty());
+	ALWAYS_ASSERT(return_types.empty());
+	ALWAYS_ASSERT(names.empty());
 
 	return_types.reserve(2);
 	names.reserve(2);
@@ -104,8 +104,8 @@ struct HttpfsTcpConnectionData : public GlobalTableFunctionState {
 
 unique_ptr<FunctionData> GetHttpfsTcpConnectionNumFuncBind(ClientContext &context, TableFunctionBindInput &input,
                                                            vector<LogicalType> &return_types, vector<string> &names) {
-	D_ASSERT(return_types.empty());
-	D_ASSERT(names.empty());
+	ALWAYS_ASSERT(return_types.empty());
+	ALWAYS_ASSERT(names.empty());
 
 	return_types.reserve(2);
 	names.reserve(2);

@@ -66,7 +66,7 @@ void CheckMulti(GlobalInfo *g) {
 
 		curl_multi_remove_handle(g->multi, easy);
 		auto iter = g->ongoing_requests.find(easy);
-		D_ASSERT(iter != g->ongoing_requests.end());
+		ALWAYS_ASSERT(iter != g->ongoing_requests.end());
 		g->ongoing_requests.erase(iter);
 	}
 }
@@ -77,7 +77,7 @@ void TimerCallback(GlobalInfo *g, int revents) {
 	uint64_t count = 0;
 	// Epoll leverages reactor model, need to read active bytes out.
 	const int bytes_read = read(g->timer_fd, &count, sizeof(uint64_t));
-	D_ASSERT(bytes_read == sizeof(uint64_t));
+	ALWAYS_ASSERT(bytes_read == sizeof(uint64_t));
 
 	curl_multi_socket_action(g->multi, CURL_SOCKET_TIMEOUT, 0, &g->still_running);
 	CheckMulti(g);
@@ -343,7 +343,7 @@ void MultiCurlManager::HandleEvent() {
 			} else if (events[idx].data.fd == global_info->event_fd) {
 				uint64_t unused = 0;
 				const int ret = read(global_info->event_fd, &unused, sizeof(unused));
-				D_ASSERT(ret == sizeof(unused));
+				ALWAYS_ASSERT(ret == sizeof(unused));
 				ProcessPendingRequests();
 			} else {
 				EventCallback(global_info.get(), events[idx].data.fd, events[idx].events);
@@ -378,7 +378,7 @@ void MultiCurlManager::ProcessPendingRequests() {
 		auto *curl_request_ptr = curl_request.get();
 		CURL *easy_curl = curl_request->easy_curl;
 		auto iter = global_info->ongoing_requests.find(easy_curl);
-		D_ASSERT(iter == global_info->ongoing_requests.end());
+		ALWAYS_ASSERT(iter == global_info->ongoing_requests.end());
 		global_info->ongoing_requests[easy_curl] = std::move(curl_request);
 
 		curl_easy_setopt(easy_curl, CURLOPT_PRIVATE, curl_request_ptr);
@@ -398,7 +398,7 @@ unique_ptr<HTTPResponse> MultiCurlManager::HandleRequest(unique_ptr<CurlRequest>
 #ifdef __linux__
 	uint64_t one = 1;
 	const ssize_t ret = write(global_info->event_fd, &one, sizeof(one));
-	D_ASSERT(ret == sizeof(one));
+	ALWAYS_ASSERT(ret == sizeof(one));
 #elif defined(__APPLE__)
 	struct kevent ev;
 	EV_SET(&ev, global_info->event_ident, EVFILT_USER, 0, NOTE_TRIGGER, 0, nullptr);
