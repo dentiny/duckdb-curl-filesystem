@@ -79,6 +79,8 @@ add_executable(http_filesystem_test integration/http_filesystem_test.cpp)
 target_link_libraries(http_filesystem_test ${EXTENSION_NAME} duckdb_static
                       dummy_static_extension_loader)
 
+add_subdirectory(test/unittest)
+
 # Benchmark
 if(${BUILD_BENCHMARKS})
   add_executable(multicurl_benchmark benchmark/multicurl_benchmark.cpp)

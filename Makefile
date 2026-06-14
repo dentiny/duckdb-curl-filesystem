@@ -10,6 +10,7 @@ include extension-ci-tools/makefiles/duckdb_extension.Makefile
 format-all: format
 	find integration/ -iname *.hpp -o -iname *.cpp | xargs clang-format --sort-includes=0 -style=file -i
 	find benchmark/ -iname *.hpp -o -iname *.cpp | xargs clang-format --sort-includes=0 -style=file -i
+	find test/ -iname *.hpp -o -iname *.cpp | xargs clang-format --sort-includes=0 -style=file -i
 	cmake-format -i CMakeLists.txt
 
 HTTPFS_TEST_TMPDIR := /tmp/curl-httpfs-duckdb-httpfs-test
