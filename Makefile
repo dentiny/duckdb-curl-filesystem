@@ -24,7 +24,7 @@ define PREPARE_HTTPFS_TESTS
 	@mkdir -p $(HTTPFS_TEST_TMPDIR)
 	@cp -r duckdb-httpfs/test $(HTTPFS_TEST_TMPDIR)/test
 	@find $(HTTPFS_TEST_TMPDIR)/test -type f \( -name "*.test" -o -name "*.test_slow" \) -exec \
-		sed -i 's/^require httpfs$$/require curl_httpfs\n\nstatement ok\nSELECT curl_httpfs_clear_metrics();/' {} +
+		sed -i 's/^require httpfs$$/require curl_httpfs/' {} +
 	@for f in $(HTTPFS_TEST_BLACKLIST); do rm -f $(HTTPFS_TEST_TMPDIR)/$$f; done;
 endef
 

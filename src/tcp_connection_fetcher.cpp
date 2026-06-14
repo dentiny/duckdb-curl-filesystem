@@ -15,7 +15,6 @@
 
 #include "duckdb/common/string.hpp"
 #include "duckdb/common/unordered_map.hpp"
-#include "tcp_ip_recorder.hpp"
 
 namespace duckdb {
 
@@ -158,20 +157,5 @@ unordered_map<string, int> GetTcpConnectionNum() {
 }
 
 #endif
-
-unordered_map<string, int> GetHttpfsTcpConnectionNum() {
-	auto all_ips = TcpIpRecorder::GetInstance().GetAllIps();
-	const auto tcp_conns = GetTcpConnectionNum();
-
-	unordered_map<string, int> filtered_tcp_conns;
-	for (const auto &cur_ip : all_ips) {
-		auto iter = tcp_conns.find(cur_ip);
-		if (iter == tcp_conns.end()) {
-			continue;
-		}
-		filtered_tcp_conns.emplace(cur_ip, iter->second);
-	}
-	return filtered_tcp_conns;
-}
 
 } // namespace duckdb

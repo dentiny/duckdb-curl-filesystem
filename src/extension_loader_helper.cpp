@@ -6,18 +6,10 @@
 #include "httpfs_client.hpp"
 #include "multi_curl_util.hpp"
 #include "tcp_connection_query_function.hpp"
-#include "tcp_ip_recorder.hpp"
 
 namespace duckdb {
 
 namespace {
-constexpr bool SUCCESS = true;
-
-// Clear internal metrics collection.
-void ClearAllCache(const DataChunk &args, ExpressionState &state, Vector &result) {
-	TcpIpRecorder::GetInstance().Clear();
-	result.Reference(Value(SUCCESS));
-}
 
 // Get the name of the active HTTP util implementation.
 void GetHttpUtilName(const DataChunk &args, ExpressionState &state, Vector &result) {
@@ -82,16 +74,8 @@ void LoadExtensionInternal(ExtensionLoader &loader) {
 	                          "Turn on and off curl-based http util verbose logging.", LogicalType::BOOLEAN, false,
 	                          callback_set_curl_verbose_logging);
 
-	// Clear extension internal metrics collection.
-	ScalarFunction clear_cache_function("curl_httpfs_clear_metrics", /*arguments=*/ {},
-	                                    /*return_type=*/LogicalType {LogicalTypeId::BOOLEAN}, ClearAllCache);
-	loader.RegisterFunction(std::move(clear_cache_function));
-
 	// Register TCP connection status function.
 	loader.RegisterFunction(GetTcpConnectionNumFunc());
-
-	// Register httpfs TCP connection status function.
-	loader.RegisterFunction(GetHttpfsTcpConnectionNumFunc());
 }
 
 } // namespace duckdb
