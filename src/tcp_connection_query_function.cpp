@@ -90,73 +90,6 @@ void GetTcpConnectionNumTableFunc(ClientContext &context, TableFunctionInput &da
 	}
 	output.SetCardinality(count);
 }
-
-//===--------------------------------------------------------------------===//
-// Get httpfs TCP connection number query function
-//===--------------------------------------------------------------------===//
-
-struct HttpfsTcpConnectionData : public GlobalTableFunctionState {
-	vector<TcpConnectionStatus> tcp_connection_status;
-
-	// Used to record the progress of emission.
-	uint64_t offset = 0;
-};
-
-unique_ptr<FunctionData> GetHttpfsTcpConnectionNumFuncBind(ClientContext &context, TableFunctionBindInput &input,
-                                                           vector<LogicalType> &return_types, vector<string> &names) {
-	ALWAYS_ASSERT(return_types.empty());
-	ALWAYS_ASSERT(names.empty());
-
-	return_types.reserve(2);
-	names.reserve(2);
-
-	return_types.emplace_back(LogicalType {LogicalTypeId::VARCHAR});
-	return_types.emplace_back(LogicalType {LogicalTypeId::BIGINT});
-	names.emplace_back("IP");
-	names.emplace_back("TCP connection number");
-
-	return nullptr;
-}
-
-unique_ptr<GlobalTableFunctionState> GetHttpfsTcpConnectionNumFuncInit(ClientContext &context,
-                                                                       TableFunctionInitInput &input) {
-	auto result = make_uniq<HttpfsTcpConnectionData>();
-	auto &tcp_connection_status = result->tcp_connection_status;
-
-	auto tcp_connection_map = GetHttpfsTcpConnectionNum();
-	tcp_connection_status.reserve(tcp_connection_map.size());
-	for (const auto &[cur_ip, cur_cnt] : tcp_connection_map) {
-		TcpConnectionStatus cur_tcp_conn_status;
-		cur_tcp_conn_status.ip = cur_ip;
-		cur_tcp_conn_status.count = cur_cnt;
-		tcp_connection_status.emplace_back(std::move(cur_tcp_conn_status));
-	}
-
-	// Sort by IP to provide stable output.
-	std::sort(tcp_connection_status.begin(), tcp_connection_status.end(),
-	          [](const TcpConnectionStatus &a, const TcpConnectionStatus &b) { return a.ip < b.ip; });
-
-	return std::move(result);
-}
-
-void GetHttpfsTcpConnectionNumTableFunc(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
-	auto &data = data_p.global_state->Cast<HttpfsTcpConnectionData>();
-
-	// All entries have been emitted.
-	if (data.offset >= data.tcp_connection_status.size()) {
-		return;
-	}
-
-	// Start filling in the result buffer.
-	idx_t count = 0;
-	while (data.offset < data.tcp_connection_status.size() && count < STANDARD_VECTOR_SIZE) {
-		auto &entry = data.tcp_connection_status[data.offset++];
-		output.SetValue(/*col_idx=*/0, count, entry.ip);
-		output.SetValue(/*col_idx=*/1, count, entry.count);
-		count++;
-	}
-	output.SetCardinality(count);
-}
 } // namespace
 
 TableFunction GetTcpConnectionNumFunc() {
@@ -165,15 +98,6 @@ TableFunction GetTcpConnectionNumFunc() {
 	                                       /*function=*/GetTcpConnectionNumTableFunc,
 	                                       /*bind=*/GetTcpConnectionNumFuncBind,
 	                                       /*init_global=*/GetTcpConnectionNumFuncInit};
-	return get_tcp_conn_query_func;
-}
-
-TableFunction GetHttpfsTcpConnectionNumFunc() {
-	TableFunction get_tcp_conn_query_func {/*name=*/"curl_httpfs_get_httpfs_tcp_connection",
-	                                       /*arguments=*/ {},
-	                                       /*function=*/GetHttpfsTcpConnectionNumTableFunc,
-	                                       /*bind=*/GetHttpfsTcpConnectionNumFuncBind,
-	                                       /*init_global=*/GetHttpfsTcpConnectionNumFuncInit};
 	return get_tcp_conn_query_func;
 }
 } // namespace duckdb

@@ -7,7 +7,6 @@
 #include "duckdb/common/helper.hpp"
 #include "duckdb/common/unique_ptr.hpp"
 #include "syscall_macros.hpp"
-#include "tcp_ip_recorder.hpp"
 
 // Platform headers
 #ifdef __linux__
@@ -404,10 +403,6 @@ unique_ptr<HTTPResponse> MultiCurlManager::HandleRequest(unique_ptr<CurlRequest>
 	EV_SET(&ev, global_info->event_ident, EVFILT_USER, 0, NOTE_TRIGGER, 0, nullptr);
 	kevent(global_info->kq_fd, &ev, 1, nullptr, 0, nullptr);
 #endif
-
-	char *ip = nullptr;
-	curl_easy_getinfo(easy_curl, CURLINFO_PRIMARY_IP, &ip);
-	TcpIpRecorder::GetInstance().RecordIp(ip);
 
 	return resp_fut.get();
 }
