@@ -48,17 +48,27 @@ void CheckMulti(GlobalInfo *g) {
 		curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &response_code);
 		req->info->response_code = static_cast<uint16_t>(response_code);
 
+		const CURLcode res = msg->data.result;
 		HTTPStatusCode status_code = HTTPUtil::ToStatusCode(req->info->response_code);
 		auto resp = make_uniq<HTTPResponse>(status_code);
-		resp->body = req->info->body;
 		resp->url = req->info->url;
 		resp->reason = HTTPUtil::GetStatusMessage(status_code);
-		if (!req->info->header_collection.empty()) {
-			for (auto &header : req->info->header_collection.back()) {
-				if (header.first == "__RESPONSE_STATUS__") {
-					continue;
+		if (res != CURLcode::CURLE_OK) {
+			if (!req->info->header_collection.empty() &&
+			    req->info->header_collection.back().HasHeader("__RESPONSE_STATUS__")) {
+				resp->request_error = req->info->header_collection.back().GetHeaderValue("__RESPONSE_STATUS__");
+			} else {
+				resp->request_error = curl_easy_strerror(res);
+			}
+		} else {
+			resp->body = req->info->body;
+			if (!req->info->header_collection.empty()) {
+				for (auto &header : req->info->header_collection.back()) {
+					if (header.first == "__RESPONSE_STATUS__") {
+						continue;
+					}
+					resp->headers.Insert(header.first, header.second);
 				}
-				resp->headers.Insert(header.first, header.second);
 			}
 		}
 		req->response.set_value(std::move(resp));
