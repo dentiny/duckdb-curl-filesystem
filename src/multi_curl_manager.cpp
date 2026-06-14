@@ -61,7 +61,7 @@ void CheckMulti(GlobalInfo *g) {
 				resp->request_error = curl_easy_strerror(res);
 			}
 		} else {
-			resp->body = req->info->body;
+			resp->body = std::move(req->info->body);
 			if (!req->info->header_collection.empty()) {
 				for (auto &header : req->info->header_collection.back()) {
 					if (header.first == "__RESPONSE_STATUS__") {
