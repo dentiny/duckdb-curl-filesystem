@@ -22,6 +22,7 @@ Track these as a checklist; do not skip ahead:
 - 5. Build: CMAKE_BUILD_PARALLEL_LEVEL=10 make reldebug
 - 6. Run tests (both must pass):
   + SQL test: `make test_reldebug` (expands to `./build/reldebug/test/unittest "test/*"`)
+- 7. Bumpup version at community extension repo (i.e., `~/Desktop/community-extensions`)
 
 ## Reference: historical upgrade commits
 
