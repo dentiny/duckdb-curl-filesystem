@@ -1,3 +1,9 @@
+# 0.4.4
+
+## Changed
+
+- Upgrade DuckDB and httpfs extension to v1.5.5
+
 # 0.4.3
 
 ## Changed
