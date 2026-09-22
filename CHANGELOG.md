@@ -6,7 +6,9 @@
 
 ## Fixed
 
-- Fix version macros
+- Fix version macros ([#73])
+
+[#73]: https://github.com/dentiny/duckdb-curl-filesystem/pull/73
 
 # 0.4.4
 
