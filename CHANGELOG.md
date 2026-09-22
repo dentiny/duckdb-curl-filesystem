@@ -2,8 +2,11 @@
 
 ## Added
 
-- Added descriptions, examples, parameter names, and categories for all
-  curl_httpfs-specific functions in `duckdb_functions()`.
+- Added descriptions, examples, parameter names, and categories for all curl_httpfs-specific functions in `duckdb_functions()`.
+
+## Fixed
+
+- Fix version macros
 
 # 0.4.4
 
