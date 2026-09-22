@@ -1,3 +1,10 @@
+# 0.4.5
+
+## Added
+
+- Added descriptions, examples, parameter names, and categories for all
+  curl_httpfs-specific functions in `duckdb_functions()`.
+
 # 0.4.4
 
 ## Changed

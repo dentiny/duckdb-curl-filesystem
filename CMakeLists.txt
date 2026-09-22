@@ -39,6 +39,7 @@ set(EXTENSION_SOURCES
     duckdb-httpfs/src/httpfs_httplib_client.cpp
     duckdb-httpfs/src/s3fs.cpp
     duckdb-httpfs/src/s3_multi_part_upload.cpp
+    src/curl_httpfs_functions.cpp
     src/curl_httpfs_extension.cpp
     src/curl_request.cpp
     src/extension_loader_helper.cpp
