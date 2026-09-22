@@ -1,0 +1,19 @@
+# name: test/sql/curl_httpfs_metadata.test
+# description: test catalog metadata for curl_httpfs functions
+# group: [sql]
+
+require curl_httpfs
+
+query I
+SELECT count(*)
+FROM duckdb_functions()
+WHERE function_name IN (
+    'curl_httpfs_get_tcp_connection',
+    'curl_httpfs_http_util_name'
+)
+AND description IS NOT NULL
+AND length(examples) > 0
+AND length(categories) > 0
+AND parameters = [];
+----
+2

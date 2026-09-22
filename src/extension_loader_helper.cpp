@@ -1,32 +1,16 @@
 #include "extension_loader_helper.hpp"
 
-#include "duckdb/main/client_context.hpp"
+#include "curl_httpfs_functions.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
 #include "extension_config.hpp"
 #include "httpfs_client.hpp"
 #include "multi_curl_util.hpp"
-#include "tcp_connection_query_function.hpp"
 
 namespace duckdb {
-
-namespace {
-
-// Get the name of the active HTTP util implementation.
-void GetHttpUtilName(const DataChunk &args, ExpressionState &state, Vector &result) {
-	auto &config = DBConfig::GetConfig(*state.GetContext().db);
-	string name = config.GetHTTPUtil().GetName();
-	result.Reference(Value(name));
-}
-} // namespace
 
 void LoadExtensionInternal(ExtensionLoader &loader) {
 	auto &instance = loader.GetDatabaseInstance();
 	auto &config = DBConfig::GetConfig(instance);
-
-	// Expose the active HTTP util implementation name for diagnostics and testing.
-	ScalarFunction http_util_name_function("curl_httpfs_http_util_name", /*arguments=*/ {},
-	                                       /*return_type=*/LogicalType {LogicalTypeId::VARCHAR}, GetHttpUtilName);
-	loader.RegisterFunction(std::move(http_util_name_function));
 
 	// Select the HTTP client implementation. Extends upstream httpfs with multi_curl support.
 	auto callback_httpfs_client_implementation = [](ClientContext &context, SetScope scope, Value &parameter) {
@@ -74,8 +58,7 @@ void LoadExtensionInternal(ExtensionLoader &loader) {
 	                          "Turn on and off curl-based http util verbose logging.", LogicalType::BOOLEAN, false,
 	                          callback_set_curl_verbose_logging);
 
-	// Register TCP connection status function.
-	loader.RegisterFunction(GetTcpConnectionNumFunc());
+	RegisterCurlHttpfsFunctions(loader);
 }
 
 } // namespace duckdb
