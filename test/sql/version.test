@@ -1,0 +1,12 @@
+# name: test/sql/version.test
+# description: test curl_httpfs extension version
+# group: [sql]
+
+require curl_httpfs
+
+query I
+SELECT extension_version
+FROM duckdb_extensions()
+WHERE extension_name = 'curl_httpfs';
+----
+v0.4.5

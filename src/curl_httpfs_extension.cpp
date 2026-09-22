@@ -67,8 +67,8 @@ std::string CurlHttpfsExtension::Name() {
 }
 
 std::string CurlHttpfsExtension::Version() const {
-#ifdef EXT_VERSION_HTTPFS
-	return EXT_VERSION_HTTPFS;
+#ifdef EXT_VERSION_CURL_HTTPFS
+	return EXT_VERSION_CURL_HTTPFS;
 #else
 	return "";
 #endif
