@@ -1,5 +1,9 @@
 # 0.4.5
 
+## Changed
+
+- Update DuckDB and extension-ci-tools to `v1.5.6` and align httpfs with DuckDB core.
+
 ## Added
 
 - Added descriptions, examples, parameter names, and categories for all curl_httpfs-specific functions in `duckdb_functions()`.
