@@ -3,6 +3,7 @@
 ## Changed
 
 - Update DuckDB and extension-ci-tools to `v1.5.6`.
+- Target DuckDB `v1.5.6` in the active distribution and code-quality workflows.
 - Align duckdb-httpfs with DuckDB `v1.5.6`'s `.github/config/extensions/httpfs.cmake` pin (`4bc690dba4496c765777a0269d48fdbaff7cdc11`).
 
 ## Added
