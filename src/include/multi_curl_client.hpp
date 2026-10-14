@@ -29,6 +29,13 @@ private:
 	unique_ptr<CURLHandle> curl;
 	optional_ptr<HTTPState> state;
 	unique_ptr<RequestInfo> request_info;
+	string stored_bearer_token;
+	string stored_cert_file_path;
+	string stored_http_proxy;
+	idx_t stored_http_proxy_port = 0;
+	string stored_http_proxy_username;
+	string stored_http_proxy_password;
+	bool stored_verify_ssl = false;
 
 	static void InitCurlGlobal();
 	static void DestroyCurlGlobal();

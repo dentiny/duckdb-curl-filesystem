@@ -81,25 +81,43 @@ void MultiCurlClient::Initialize(HTTPParams &http_p) {
 	}
 	state = http_params.state;
 
-	InitCurlGlobal();
-
 	std::string cert_file_path;
 	if (!http_params.ca_cert_file.empty()) {
 		cert_file_path = http_params.ca_cert_file;
 	} else {
 		cert_file_path = SelectCURLCertPath();
 	}
-	curl = make_uniq<CURLHandle>(bearer_token, cert_file_path);
+	const auto proxy_port = http_params.http_proxy.empty() ? idx_t(0) : http_params.http_proxy_port;
+	const auto proxy_username = http_params.http_proxy.empty() ? string() : http_params.http_proxy_username;
+	const auto proxy_password = http_params.http_proxy.empty() ? string() : http_params.http_proxy_password;
+	const auto verify_ssl = http_params.enable_curl_server_cert_verification;
+	const bool incompatible_config = stored_bearer_token != bearer_token || stored_cert_file_path != cert_file_path ||
+	                                 stored_http_proxy != http_params.http_proxy ||
+	                                 stored_http_proxy_port != proxy_port ||
+	                                 stored_http_proxy_username != proxy_username ||
+	                                 stored_http_proxy_password != proxy_password || stored_verify_ssl != verify_ssl;
+	if (!curl || incompatible_config) {
+		// Keep a stable easy handle so libcurl can reuse its connection cache. Replacing
+		// the handle for every Initialize call closes the previous keep-alive connection.
+		// Replace it when connection-affecting identity settings change.
+		InitCurlGlobal();
+		curl = make_uniq<CURLHandle>(bearer_token, cert_file_path);
+		stored_bearer_token = bearer_token;
+		stored_cert_file_path = cert_file_path;
+		stored_http_proxy = http_params.http_proxy;
+		stored_http_proxy_port = proxy_port;
+		stored_http_proxy_username = proxy_username;
+		stored_http_proxy_password = proxy_password;
+		stored_verify_ssl = verify_ssl;
+	}
 	request_info = make_uniq<RequestInfo>();
 
 	curl_easy_setopt(*curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
 	curl_easy_setopt(*curl, CURLOPT_FOLLOWLOCATION, 1L);
 
-	if (!http_params.keep_alive) {
-		curl_easy_setopt(*curl, CURLOPT_FORBID_REUSE, 1L);
-	}
+	curl_easy_setopt(*curl, CURLOPT_FORBID_REUSE, http_params.keep_alive ? 0L : 1L);
 
-	if (http_params.enable_curl_server_cert_verification) {
+	if (verify_ssl) {
 		curl_easy_setopt(*curl, CURLOPT_SSL_VERIFYPEER, 1L);
 		curl_easy_setopt(*curl, CURLOPT_SSL_VERIFYHOST, 2L);
 	} else {
@@ -116,6 +134,9 @@ void MultiCurlClient::Initialize(HTTPParams &http_p) {
 	curl_easy_setopt(*curl, CURLOPT_WRITEFUNCTION, RequestWriteCallback);
 	curl_easy_setopt(*curl, CURLOPT_WRITEDATA, &request_info->body);
 
+	curl_easy_setopt(*curl, CURLOPT_PROXY, nullptr);
+	curl_easy_setopt(*curl, CURLOPT_PROXYUSERNAME, nullptr);
+	curl_easy_setopt(*curl, CURLOPT_PROXYPASSWORD, nullptr);
 	if (!http_params.http_proxy.empty()) {
 		curl_easy_setopt(*curl, CURLOPT_PROXY,
 		                 StringUtil::Format("%s:%s", http_params.http_proxy, http_params.http_proxy_port).c_str());
