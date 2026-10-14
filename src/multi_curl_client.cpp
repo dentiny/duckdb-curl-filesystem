@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <curl/curl.h>
+#include <limits>
 #include <sys/stat.h>
 
 #include "duckdb/common/exception/http_exception.hpp"
@@ -67,6 +68,37 @@ static size_t RequestHeaderCallback(void *contents, size_t size, size_t nmemb, v
 	return total_size;
 }
 
+static long GetTimeoutMillis(const HTTPParams &http_params) {
+	// libcurl's millisecond timeout options take a signed long. Preserve 0/0 as
+	// no timeout, but round any positive sub-millisecond timeout up to 1 ms so
+	// it cannot become libcurl's special value of 0 (unlimited).
+	if (http_params.timeout == 0 && http_params.timeout_usec == 0) {
+		return 0;
+	}
+	constexpr uint64_t MILLIS_PER_SECOND = 1000;
+	constexpr uint64_t MICROS_PER_MILLISECOND = 1000;
+	const auto max_millis = static_cast<uint64_t>(std::numeric_limits<long>::max());
+	const auto seconds = http_params.timeout;
+	const auto micros = http_params.timeout_usec;
+	if (seconds > max_millis / MILLIS_PER_SECOND) {
+		return std::numeric_limits<long>::max();
+	}
+	auto timeout_millis = seconds * MILLIS_PER_SECOND;
+	const auto extra_millis = micros / MICROS_PER_MILLISECOND;
+	const auto fractional_micros = micros % MICROS_PER_MILLISECOND;
+	if (extra_millis > max_millis - timeout_millis) {
+		return std::numeric_limits<long>::max();
+	}
+	timeout_millis += extra_millis;
+	if (fractional_micros > 0) {
+		if (timeout_millis == max_millis) {
+			return std::numeric_limits<long>::max();
+		}
+		timeout_millis++;
+	}
+	return static_cast<long>(timeout_millis);
+}
+
 } // namespace
 
 MultiCurlClient::MultiCurlClient(HTTPFSParams &http_params, const string &proto_host_port) {
@@ -107,8 +139,9 @@ void MultiCurlClient::Initialize(HTTPParams &http_p) {
 		curl_easy_setopt(*curl, CURLOPT_SSL_VERIFYHOST, 0L);
 	}
 
-	curl_easy_setopt(*curl, CURLOPT_TIMEOUT, http_params.timeout);
-	curl_easy_setopt(*curl, CURLOPT_CONNECTTIMEOUT, http_params.timeout);
+	const auto timeout_millis = GetTimeoutMillis(http_params);
+	curl_easy_setopt(*curl, CURLOPT_TIMEOUT_MS, timeout_millis);
+	curl_easy_setopt(*curl, CURLOPT_CONNECTTIMEOUT_MS, timeout_millis);
 	curl_easy_setopt(*curl, CURLOPT_ACCEPT_ENCODING, "identity");
 
 	curl_easy_setopt(*curl, CURLOPT_HEADERFUNCTION, RequestHeaderCallback);
