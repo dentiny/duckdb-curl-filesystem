@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 
 #include "duckdb/common/exception/http_exception.hpp"
+#include "duckdb/common/string_util.hpp"
 #include "multi_curl_manager.hpp"
 
 namespace duckdb {
@@ -228,8 +229,19 @@ unique_ptr<HTTPResponse> MultiCurlClient::Post(PostRequestInfo &info) {
 	}
 
 	auto curl_headers = TransformHeadersCurl(info.headers, info.params);
-	const string content_type = "Content-Type: application/octet-stream";
-	curl_headers.Add(content_type.c_str());
+	bool has_content_type = info.headers.HasHeader("Content-Type");
+	const auto &httpfs_params = info.params.Cast<HTTPFSParams>();
+	if (!has_content_type && !httpfs_params.pre_merged_headers) {
+		for (const auto &header : info.params.extra_headers) {
+			if (StringUtil::CIEquals(header.first, "Content-Type")) {
+				has_content_type = true;
+				break;
+			}
+		}
+	}
+	if (!has_content_type) {
+		curl_headers.Add("Content-Type: application/octet-stream");
+	}
 	request_info->url = info.url;
 
 	CURLcode res;
