@@ -14,6 +14,7 @@
 #endif
 
 #include "duckdb/common/string.hpp"
+#include <string_view>
 #include "duckdb/common/unordered_map.hpp"
 
 namespace duckdb {
@@ -77,8 +78,8 @@ unordered_map<string, int> GetTcpConnectionNum() {
 #else
 
 namespace {
-constexpr const char *IPV4_TCP_PROC_FS_PATH = "/proc/net/tcp";
-constexpr const char *IPV6_TCP_PROC_FS_PATH = "/proc/net/tcp6";
+constexpr std::string_view IPV4_TCP_PROC_FS_PATH = "/proc/net/tcp";
+constexpr std::string_view IPV6_TCP_PROC_FS_PATH = "/proc/net/tcp6";
 
 string HexToIP(const string &hex) {
 	if (hex.size() != 8) {
@@ -151,8 +152,8 @@ void ParseProcTCP(const char *path, unordered_map<string, int> &per_remote_ip) {
 unordered_map<string, int> GetTcpConnectionNum() {
 	// Maps from IP to TCP connection count.
 	unordered_map<string, int> aggregated_tcp_conns;
-	ParseProcTCP(IPV4_TCP_PROC_FS_PATH, aggregated_tcp_conns);
-	ParseProcTCP(IPV6_TCP_PROC_FS_PATH, aggregated_tcp_conns);
+	ParseProcTCP(IPV4_TCP_PROC_FS_PATH.data(), aggregated_tcp_conns);
+	ParseProcTCP(IPV6_TCP_PROC_FS_PATH.data(), aggregated_tcp_conns);
 	return aggregated_tcp_conns;
 }
 

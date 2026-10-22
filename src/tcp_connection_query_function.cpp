@@ -36,7 +36,7 @@ struct TcpConnectionData : public GlobalTableFunctionState {
 };
 
 unique_ptr<FunctionData> GetTcpConnectionNumFuncBind(ClientContext &context, TableFunctionBindInput &input,
-                                                     vector<LogicalType> &return_types, vector<string> &names) {
+                                                     vector<LogicalType> &return_types, vector<Identifier> &names) {
 	ALWAYS_ASSERT(return_types.empty());
 	ALWAYS_ASSERT(names.empty());
 
@@ -69,7 +69,7 @@ unique_ptr<GlobalTableFunctionState> GetTcpConnectionNumFuncInit(ClientContext &
 	std::sort(tcp_connection_status.begin(), tcp_connection_status.end(),
 	          [](const TcpConnectionStatus &a, const TcpConnectionStatus &b) { return a.ip < b.ip; });
 
-	return std::move(result);
+	return result;
 }
 
 void GetTcpConnectionNumTableFunc(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {

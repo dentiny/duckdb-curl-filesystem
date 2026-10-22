@@ -6,7 +6,7 @@
 
 #include "duckdb.hpp"
 #include "duckdb/common/helper.hpp"
-#include "duckdb/common/http_util.hpp"
+#include "duckdb/main/http/http_util.hpp"
 #include "duckdb/common/string.hpp"
 #include "duckdb/common/unique_ptr.hpp"
 #include "duckdb/common/shared_ptr.hpp"
@@ -14,8 +14,8 @@
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/client_context_file_opener.hpp"
-#include "httpfs.hpp"
-#include "httpfs_client.hpp"
+#include "http/httpfs.hpp"
+#include "http/httpfs_client.hpp"
 #include "multi_curl_manager.hpp"
 #include "thread_pool.hpp"
 
@@ -38,7 +38,7 @@ void HandleSingleRequest(ClientContextFileOpener *file_opener, idx_t start_offse
 
 	bytes_to_read = std::min(bytes_to_read, file_size - start_offset);
 	string buffer(bytes_to_read, '\0');
-	file_handle->Read(static_cast<void *>(const_cast<char *>(buffer.data())), bytes_to_read, /*location=*/start_offset);
+	file_handle->Read(buffer.data(), bytes_to_read, /*location=*/start_offset);
 }
 
 // Read a remote object via httpfs.

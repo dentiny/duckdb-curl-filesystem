@@ -2,12 +2,12 @@
 
 #include <curl/curl.h>
 #include <future>
-#include <mutex>
+#include "duckdb/common/mutex.hpp"
 #include <thread>
 
 #include "curl_request.hpp"
 #include "duckdb/common/helper.hpp"
-#include "duckdb/common/http_util.hpp"
+#include "duckdb/main/http/http_util.hpp"
 #include "duckdb/common/queue.hpp"
 #include "duckdb/common/unique_ptr.hpp"
 #include "duckdb/common/unordered_map.hpp"
@@ -53,8 +53,8 @@ private:
 
 	unique_ptr<GlobalInfo> global_info;
 	// Used to protect [`pending_requests`].
-	std::mutex mu;
-	queue<unique_ptr<CurlRequest>> pending_requests;
+	annotated_mutex mu;
+	queue<unique_ptr<CurlRequest>> pending_requests DUCKDB_GUARDED_BY(mu);
 	// Background thread which keeps polling with polling engine.
 	std::thread bkg_thread;
 };

@@ -2,6 +2,7 @@
 
 #include "duckdb/common/assert.hpp"
 #include "extension_config.hpp"
+#include "http/httpfs_client.hpp"
 
 namespace duckdb {
 
@@ -17,7 +18,12 @@ CurlRequest::CurlRequest(CURL *easy_curl_p) : info(make_uniq<RequestInfo>()), ea
 	}
 }
 
-CurlRequest::~CurlRequest() = default;
+CurlRequest::~CurlRequest() {
+	if (owned_headers) {
+		curl_easy_setopt(easy_curl, CURLOPT_HTTPHEADER, nullptr);
+		curl_slist_free_all(owned_headers);
+	}
+}
 
 void CurlRequest::SetUrl(string url) {
 	curl_easy_setopt(easy_curl, CURLOPT_URL, url.c_str());
@@ -27,6 +33,20 @@ void CurlRequest::SetHeaders(curl_slist *headers) {
 	if (headers != nullptr) {
 		curl_easy_setopt(easy_curl, CURLOPT_HTTPHEADER, headers);
 	}
+}
+
+void CurlRequest::SetHeaders(const HTTPHeaders &headers, HTTPParams &params) {
+	const auto merged_headers = BaseRequest::MergeHeaders(headers, params);
+	for (const auto &header : merged_headers) {
+		const auto value =
+		    HTTPFSHeaderValue::IsEmpty(header.second) ? header.first + ";" : header.first + ": " + header.second;
+		auto new_headers = curl_slist_append(owned_headers, value.c_str());
+		if (!new_headers) {
+			throw OutOfMemoryException("Failed to allocate curl request headers");
+		}
+		owned_headers = new_headers;
+	}
+	SetHeaders(owned_headers);
 }
 
 void CurlRequest::SetGetAttrs() {
@@ -53,9 +73,9 @@ void CurlRequest::SetHeadAttrs() {
 
 	// If header starts with HTTP/... curl has followed a redirect and we have a new Header,
 	// so we push back a new header_collection and store headers from the redirect there.
-	if (header.rfind("HTTP/", 0) == 0) {
+	if (header.rfind(HTTP_STATUS_PREFIX, 0) == 0) {
 		header_collection.push_back(HTTPHeaders());
-		header_collection.back().Insert("__RESPONSE_STATUS__", header);
+		header_collection.back().Insert(string(RESPONSE_STATUS_HEADER), header);
 	}
 
 	size_t colon_pos = header.find(':');
@@ -64,11 +84,14 @@ void CurlRequest::SetHeadAttrs() {
 		// Split the string into two parts
 		std::string part1 = header.substr(0, colon_pos);
 		std::string part2 = header.substr(colon_pos + 1);
-		if (part2.at(0) == ' ') {
+		if (!part2.empty() && part2.front() == ' ') {
 			part2.erase(0, 1);
 		}
 
-		header_collection.back().Insert(part1, part2);
+		if (header_collection.empty()) {
+			header_collection.emplace_back();
+		}
+		header_collection.back().Append(std::move(part1), std::move(part2));
 	}
 	return total_size;
 }

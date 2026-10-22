@@ -3,7 +3,8 @@
 #include <functional>
 #include <future>
 #include <memory>
-#include <mutex>
+#include <condition_variable>
+#include "duckdb/common/mutex.hpp"
 #include <queue>
 #include <thread>
 #include <type_traits>
@@ -24,7 +25,7 @@ public:
 
 	// @return future for synchronization.
 	template <typename Fn, typename... Args>
-	auto Push(Fn &&fn, Args &&...args) -> std::future<typename std::result_of<Fn(Args...)>::type>;
+	auto Push(Fn &&fn, Args &&...args) -> std::future<std::invoke_result_t<Fn, Args...>>;
 
 	// Block until the threadpool is dead, or all enqueued tasks finish.
 	void Wait();
@@ -32,24 +33,24 @@ public:
 private:
 	using Job = std::function<void(void)>;
 
-	size_t idle_num_ = 0;
-	bool stopped_ = false;
-	std::mutex mutex_;
+	size_t idle_num_ DUCKDB_GUARDED_BY(mutex_) = 0;
+	bool stopped_ DUCKDB_GUARDED_BY(mutex_) = false;
+	annotated_mutex mutex_;
 	std::condition_variable new_job_cv_;
 	std::condition_variable job_completion_cv_;
-	std::queue<Job> jobs_;
+	std::queue<Job> jobs_ DUCKDB_GUARDED_BY(mutex_);
 	std::vector<std::thread> workers_;
 };
 
 template <typename Fn, typename... Args>
-auto ThreadPool::Push(Fn &&fn, Args &&...args) -> std::future<typename std::result_of<Fn(Args...)>::type> {
-	using Ret = typename std::result_of<Fn(Args...)>::type;
+auto ThreadPool::Push(Fn &&fn, Args &&...args) -> std::future<std::invoke_result_t<Fn, Args...>> {
+	using Ret = std::invoke_result_t<Fn, Args...>;
 
 	auto job =
 	    std::make_shared<std::packaged_task<Ret()>>(std::bind(std::forward<Fn>(fn), std::forward<Args>(args)...));
 	std::future<Ret> result = job->get_future();
 	{
-		std::lock_guard<std::mutex> lck(mutex_);
+		annotated_lock_guard<annotated_mutex> lck(mutex_);
 		jobs_.emplace([job = std::move(job)]() mutable { (*job)(); });
 		new_job_cv_.notify_one();
 	}

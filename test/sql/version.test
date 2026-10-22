@@ -9,4 +9,4 @@ SELECT extension_version
 FROM duckdb_extensions()
 WHERE extension_name = 'curl_httpfs';
 ----
-v0.4.5
+v0.5.0

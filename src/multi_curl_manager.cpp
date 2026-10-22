@@ -7,6 +7,7 @@
 #include "duckdb/common/helper.hpp"
 #include "duckdb/common/unique_ptr.hpp"
 #include "syscall_macros.hpp"
+#include "extension_config.hpp"
 
 // Platform headers
 #ifdef __linux__
@@ -55,8 +56,9 @@ void CheckMulti(GlobalInfo *g) {
 		resp->reason = HTTPUtil::GetStatusMessage(status_code);
 		if (res != CURLcode::CURLE_OK) {
 			if (!req->info->header_collection.empty() &&
-			    req->info->header_collection.back().HasHeader("__RESPONSE_STATUS__")) {
-				resp->request_error = req->info->header_collection.back().GetHeaderValue("__RESPONSE_STATUS__");
+			    req->info->header_collection.back().HasHeader(string(RESPONSE_STATUS_HEADER))) {
+				resp->request_error =
+				    req->info->header_collection.back().GetHeaderValue(string(RESPONSE_STATUS_HEADER));
 			} else {
 				resp->request_error = curl_easy_strerror(res);
 			}
@@ -64,19 +66,23 @@ void CheckMulti(GlobalInfo *g) {
 			resp->body = std::move(req->info->body);
 			if (!req->info->header_collection.empty()) {
 				for (auto &header : req->info->header_collection.back()) {
-					if (header.first == "__RESPONSE_STATUS__") {
+					if (header.first == RESPONSE_STATUS_HEADER) {
 						continue;
 					}
-					resp->headers.Insert(header.first, header.second);
+					for (const auto &value : req->info->header_collection.back().GetHeaderValues(header.first)) {
+						resp->headers.Append(header.first, value);
+					}
 				}
 			}
 		}
-		req->response.set_value(std::move(resp));
+		auto response_promise = std::move(req->response);
 
 		curl_multi_remove_handle(g->multi, easy);
 		auto iter = g->ongoing_requests.find(easy);
 		ALWAYS_ASSERT(iter != g->ongoing_requests.end());
 		g->ongoing_requests.erase(iter);
+		// Finish detaching and destroying the request before its caller may destroy the curl handle.
+		response_promise.set_value(std::move(resp));
 	}
 }
 
@@ -376,7 +382,7 @@ void MultiCurlManager::ProcessPendingRequests() {
 	while (true) {
 		unique_ptr<CurlRequest> curl_request;
 		{
-			const std::lock_guard<std::mutex> lck(mu);
+			const annotated_lock_guard<annotated_mutex> lck(mu);
 			if (pending_requests.empty()) {
 				return;
 			}
@@ -397,9 +403,8 @@ void MultiCurlManager::ProcessPendingRequests() {
 
 unique_ptr<HTTPResponse> MultiCurlManager::HandleRequest(unique_ptr<CurlRequest> request) {
 	auto resp_fut = request->response.get_future();
-	CURL *easy_curl = request->easy_curl;
 	{
-		const std::lock_guard<std::mutex> lck(mu);
+		const annotated_lock_guard<annotated_mutex> lck(mu);
 		pending_requests.emplace(std::move(request));
 	}
 
