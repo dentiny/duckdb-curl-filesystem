@@ -84,11 +84,11 @@ void GetTcpConnectionNumTableFunc(ClientContext &context, TableFunctionInput &da
 	idx_t count = 0;
 	while (data.offset < data.tcp_connection_status.size() && count < STANDARD_VECTOR_SIZE) {
 		auto &entry = data.tcp_connection_status[data.offset++];
-		output.SetValue(/*col_idx=*/0, count, entry.ip);
-		output.SetValue(/*col_idx=*/1, count, entry.count);
+		output.data[0].Append(entry.ip);
+		output.data[1].Append(entry.count);
 		count++;
 	}
-	output.SetCardinality(count);
+	output.CheckCardinality(count);
 }
 } // namespace
 
