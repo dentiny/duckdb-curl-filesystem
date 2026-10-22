@@ -65,7 +65,7 @@ void MultiCurlClient::Initialize(HTTPParams &http_p) {
 
 unique_ptr<HTTPResponse> MultiCurlClient::Get(GetRequestInfo &info) {
 	if (state) {
-		state->get_count++;
+		state->RecordRequest(RequestType::GET_REQUEST);
 	}
 	auto request = make_uniq<CurlRequest>(*curl);
 	request->SetUrl(info.url);
@@ -73,7 +73,7 @@ unique_ptr<HTTPResponse> MultiCurlClient::Get(GetRequestInfo &info) {
 	request->SetGetAttrs();
 	auto response = MultiCurlManager::GetInstance().HandleRequest(std::move(request));
 	if (state) {
-		state->total_bytes_received += response->body.size();
+		state->RecordBytesReceived(response->body.size());
 	}
 	if (info.response_handler && !info.response_handler(*response)) {
 		return response;
@@ -86,7 +86,7 @@ unique_ptr<HTTPResponse> MultiCurlClient::Get(GetRequestInfo &info) {
 
 unique_ptr<HTTPResponse> MultiCurlClient::Head(HeadRequestInfo &info) {
 	if (state) {
-		state->head_count++;
+		state->RecordRequest(RequestType::HEAD_REQUEST);
 	}
 	auto request = make_uniq<CurlRequest>(*curl);
 	request->SetUrl(info.url);
