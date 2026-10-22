@@ -1,6 +1,7 @@
 #include "curl_request.hpp"
 
 #include "duckdb/common/assert.hpp"
+#include "duckdb/common/string_util.hpp"
 #include "extension_config.hpp"
 #include "http/httpfs_client.hpp"
 
@@ -38,8 +39,9 @@ void CurlRequest::SetHeaders(curl_slist *headers) {
 void CurlRequest::SetHeaders(const HTTPHeaders &headers, HTTPParams &params) {
 	const auto merged_headers = BaseRequest::MergeHeaders(headers, params);
 	for (const auto &header : merged_headers) {
-		const auto value =
-		    HTTPFSHeaderValue::IsEmpty(header.second) ? header.first + ";" : header.first + ": " + header.second;
+		const auto value = HTTPFSHeaderValue::IsEmpty(header.second)
+		                       ? StringUtil::Format("%s;", header.first)
+		                       : StringUtil::Format("%s: %s", header.first, header.second);
 		auto new_headers = curl_slist_append(owned_headers, value.c_str());
 		if (!new_headers) {
 			throw OutOfMemoryException("Failed to allocate curl request headers");
