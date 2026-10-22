@@ -10,6 +10,7 @@
 
 ## Fixed
 
+- Select HTTP/1.1 when the linked libcurl lacks HTTP/2 support, instead of failing client initialization.
 - Use vector append/cardinality APIs for TCP connection rows instead of deprecated chunk setters.
 - Pass an explicit DuckDB v2 row count when returning the HTTP client name.
 - Use DuckDB v2's vector cardinality and public HTTP statistics APIs, and include the client context definition explicitly.
