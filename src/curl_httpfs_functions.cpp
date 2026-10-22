@@ -6,7 +6,7 @@
 #include "duckdb/main/extension/extension_loader.hpp"
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
-#include "httpfs_client.hpp"
+#include "http/httpfs_client.hpp"
 #include "tcp_connection_query_function.hpp"
 
 namespace duckdb {

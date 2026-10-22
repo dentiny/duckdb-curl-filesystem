@@ -2,7 +2,7 @@
 #include <iostream>
 
 #include "duckdb/common/helper.hpp"
-#include "duckdb/common/http_util.hpp"
+#include "duckdb/main/http/http_util.hpp"
 #include "duckdb/common/string.hpp"
 #include "duckdb/common/unique_ptr.hpp"
 #include "multi_curl_manager.hpp"

@@ -3,7 +3,7 @@
 #include "curl_httpfs_functions.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
 #include "extension_config.hpp"
-#include "httpfs_client.hpp"
+#include "http/httpfs_client.hpp"
 #include "multi_curl_util.hpp"
 
 namespace duckdb {
@@ -13,31 +13,31 @@ void LoadExtensionInternal(ExtensionLoader &loader) {
 	auto &config = DBConfig::GetConfig(instance);
 
 	// Select the HTTP client implementation. Extends upstream httpfs with multi_curl support.
-	auto callback_httpfs_client_implementation = [](ClientContext &context, SetScope scope, Value &parameter) {
+	auto callback_httpfs_client_implementation = [](ClientContext &context, SetScope /*scope*/, Value &parameter) {
 		auto &config = DBConfig::GetConfig(context);
 		string value = StringValue::Get(parameter);
-		if (config.GetHTTPUtil().GetName() == "WasmHTTPUtils") {
-			if (value == "wasm" || value == "default") {
+		if (config.GetHTTPUtil().GetName() == WASM_UTIL_NAME) {
+			if (value == WASM_IMPLEMENTATION || value == DEFAULT_IMPLEMENTATION) {
 				return;
 			}
 			throw InvalidInputException("Unsupported option for curl_httpfs_client_implementation, only `wasm` and "
 			                            "`default` are currently supported for duckdb-wasm");
 		}
-		if (value == "multi_curl" || value == "default") {
-			if (config.GetHTTPUtil().GetName() != "MultiCurl") {
-				config.SetHTTPUtil(make_shared_ptr<MultiCurlUtil>());
+		if (value == MULTI_CURL_IMPLEMENTATION || value == DEFAULT_IMPLEMENTATION) {
+			if (config.GetHTTPUtil().GetName() != MULTI_CURL_NAME) {
+				config.SetHTTPUtil(make_shared_ptr<MultiCurlUtil>(true, context.db.get()));
 			}
 			return;
 		}
-		if (value == "curl") {
-			if (config.GetHTTPUtil().GetName() != "HTTPFSUtil-Curl") {
-				config.SetHTTPUtil(make_shared_ptr<HTTPFSCurlUtil>());
+		if (value == CURL_IMPLEMENTATION) {
+			if (config.GetHTTPUtil().GetName() != CURL_UTIL_NAME) {
+				config.SetHTTPUtil(make_shared_ptr<HTTPFSCurlUtil>(true, context.db.get()));
 			}
 			return;
 		}
-		if (value == "httplib") {
-			if (config.GetHTTPUtil().GetName() != "HTTPFSUtil") {
-				config.SetHTTPUtil(make_shared_ptr<HTTPFSUtil>());
+		if (value == HTTPLIB_IMPLEMENTATION) {
+			if (config.GetHTTPUtil().GetName() != HTTPLIB_UTIL_NAME) {
+				config.SetHTTPUtil(make_shared_ptr<HTTPFSUtil>(context.db.get()));
 			}
 			return;
 		}
@@ -51,7 +51,7 @@ void LoadExtensionInternal(ExtensionLoader &loader) {
 	                          std::move(callback_httpfs_client_implementation));
 
 	// Provide option to enable verbose logging for curl-based implementation.
-	auto callback_set_curl_verbose_logging = [](ClientContext &context, SetScope scope, Value &parameter) {
+	auto callback_set_curl_verbose_logging = [](ClientContext & /*context*/, SetScope /*scope*/, Value &parameter) {
 		ENABLE_CURL_VERBOSE_LOGGING = parameter.GetValue<bool>();
 	};
 	config.AddExtensionOption("curl_httpfs_enable_verbose_logging",

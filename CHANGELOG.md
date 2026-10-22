@@ -1,3 +1,18 @@
+# 0.5.0
+
+## Changed
+
+- Upgrade DuckDB to `v2.0.0`, extension-ci-tools to the latest commit, and httpfs to its matching v2 sources.
+- Require C++17, replace deprecated invocation traits, and use constexpr string views for fixed names and paths.
+- Adapt HTTP clients to the v2 interface, reuse upstream certificate loading and non-multiplexed request handling, and support OPTIONS.
+- Use DuckDB's Identifier output names and annotated mutexes for shared queues and thread-pool state.
+- Update static test linkage and release metadata for the v2 build system.
+
+## Fixed
+
+- Complete request cleanup before waking callers that may destroy the curl handle.
+- Handle empty response headers without throwing and preserve repeated header values during collection.
+
 # 0.4.5
 
 ## Changed

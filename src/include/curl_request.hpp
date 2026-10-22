@@ -5,7 +5,7 @@
 #include <future>
 #include <vector>
 
-#include "duckdb/common/http_util.hpp"
+#include "duckdb/main/http/http_util.hpp"
 #include "duckdb/common/map.hpp"
 #include "duckdb/common/string.hpp"
 #include "duckdb/common/unique_ptr.hpp"
@@ -32,6 +32,7 @@ struct CurlRequest {
 	void SetUrl(string url);
 	// Set headers.
 	void SetHeaders(curl_slist *headers);
+	void SetHeaders(const HTTPHeaders &headers, HTTPParams &params);
 	// Set curl attributes for GET requests.
 	void SetGetAttrs();
 	// Set curl attributes for HEAD requests.
@@ -39,6 +40,9 @@ struct CurlRequest {
 
 	static size_t WriteHeader(void *contents, size_t size, size_t nmemb, void *userp);
 	static size_t WriteBody(void *contents, size_t size, size_t nmemb, void *userp);
+
+private:
+	curl_slist *owned_headers = nullptr;
 };
 
 } // namespace duckdb

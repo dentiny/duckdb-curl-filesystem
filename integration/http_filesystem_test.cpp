@@ -7,14 +7,14 @@
 
 #include "duckdb.hpp"
 #include "duckdb/common/helper.hpp"
-#include "duckdb/common/http_util.hpp"
+#include "duckdb/main/http/http_util.hpp"
 #include "duckdb/common/string.hpp"
 #include "duckdb/common/unique_ptr.hpp"
 #include "duckdb/common/vector.hpp"
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/client_context_file_opener.hpp"
-#include "httpfs.hpp"
+#include "http/httpfs.hpp"
 #include "multi_curl_manager.hpp"
 
 using namespace duckdb;
@@ -36,7 +36,7 @@ TEST_CASE("Range read test", "[filesystem test]") {
 	// Perform range read.
 	const idx_t bytes_to_read = 54; // number of characters in the first line
 	string buffer(bytes_to_read, '\0');
-	file_handle->Read(static_cast<void *>(const_cast<char *>(buffer.data())), bytes_to_read, /*location=*/0);
+	file_handle->Read(buffer.data(), bytes_to_read, /*location=*/0);
 	REQUIRE(buffer == "csvbase_row_id,Continent,Country,Name,MIC,Last changed");
 }
 
