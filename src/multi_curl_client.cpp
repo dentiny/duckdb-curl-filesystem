@@ -44,7 +44,11 @@ void MultiCurlClient::Initialize(HTTPParams &http_p) {
 		curl->SetOption(CURLOPT_XOAUTH2_BEARER, params.bearer_token.c_str());
 		curl->SetOption(CURLOPT_HTTPAUTH, CURLAUTH_BEARER);
 	}
-	curl->SetOption(CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
+	// The community libcurl build may not include HTTP/2 support.
+	const auto http_version = (curl_version_info(CURLVERSION_NOW)->features & CURL_VERSION_HTTP2)
+	                              ? CURL_HTTP_VERSION_2_0
+	                              : CURL_HTTP_VERSION_1_1;
+	curl->SetOption(CURLOPT_HTTP_VERSION, static_cast<long>(http_version));
 	curl->SetOption(CURLOPT_FOLLOWLOCATION, params.follow_location ? 1L : 0L);
 	curl->SetOption(CURLOPT_FORBID_REUSE, params.keep_alive ? 0L : 1L);
 	const bool verify_ssl = params.VerifyServerCertificate();
