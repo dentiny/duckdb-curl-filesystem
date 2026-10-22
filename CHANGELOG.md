@@ -10,6 +10,7 @@
 
 ## Fixed
 
+- Pass an explicit DuckDB v2 row count when returning the HTTP client name.
 - Use DuckDB v2's vector cardinality and public HTTP statistics APIs, and include the client context definition explicitly.
 - Complete request cleanup before waking callers that may destroy the curl handle.
 - Handle empty response headers without throwing and preserve repeated header values during collection.

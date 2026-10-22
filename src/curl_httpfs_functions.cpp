@@ -43,7 +43,7 @@ void RegisterTableFunction(ExtensionLoader &loader, TableFunction function, vect
 
 void GetHttpUtilName(const DataChunk &args, ExpressionState &state, Vector &result) {
 	auto &config = DBConfig::GetConfig(*state.GetContext().db);
-	result.Reference(Value(config.GetHTTPUtil().GetName()), args.size());
+	result.Reference(Value(config.GetHTTPUtil().GetName()), count_t(args.size()));
 }
 
 } // namespace
