@@ -17,3 +17,10 @@ AND length(categories) > 0
 AND parameters = [];
 ----
 2
+
+query III
+SELECT count(*), count(DISTINCT curl_httpfs_http_util_name()),
+       bool_and(length(curl_httpfs_http_util_name()) > 0)
+FROM range(4096);
+----
+4096	1	true

@@ -1,6 +1,7 @@
 #include "extension_loader_helper.hpp"
 
 #include "curl_httpfs_functions.hpp"
+#include "duckdb/main/client_context.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
 #include "extension_config.hpp"
 #include "http/httpfs_client.hpp"
