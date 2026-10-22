@@ -10,6 +10,7 @@
 
 ## Fixed
 
+- Use vector append/cardinality APIs for TCP connection rows instead of deprecated chunk setters.
 - Pass an explicit DuckDB v2 row count when returning the HTTP client name.
 - Use DuckDB v2's vector cardinality and public HTTP statistics APIs, and include the client context definition explicitly.
 - Complete request cleanup before waking callers that may destroy the curl handle.
