@@ -3,7 +3,7 @@
 
 # Extension from this repo
 duckdb_extension_load(curl_httpfs SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}
-                      EXTENSION_VERSION v0.5.0 LOAD_TESTS)
+                      EXTENSION_VERSION v0.5.1 LOAD_TESTS)
 duckdb_extension_statically_link(curl_httpfs)
 
 # Any extra extensions that should be built e.g.: duckdb_extension_load(json)
